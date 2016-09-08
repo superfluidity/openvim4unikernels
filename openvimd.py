@@ -30,12 +30,12 @@ and host controllers
 
 __author__="Alfonso Tierno"
 __date__ ="$10-jul-2014 12:07:15$"
-__version__="0.4.6-r466"
-version_date="Jul 2016"
+__version__="0.4.7-r494"
+version_date="Sep 2016"
 database_version="0.7"      #expected database schema version
 
 import httpserver
-from utils import auxiliary_functions as af
+import auxiliary_functions as af
 import sys
 import getopt
 import time

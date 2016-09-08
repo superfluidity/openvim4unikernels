@@ -40,7 +40,7 @@ import libvirt
 from vim_schema import localinfo_schema, hostinfo_schema
 import random
 #from logging import Logger
-#import utils.auxiliary_functions as af
+#import auxiliary_functions as af
 
 #TODO: insert a logging system
 

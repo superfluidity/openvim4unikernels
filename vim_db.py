@@ -34,7 +34,7 @@ __date__ ="$10-jul-2014 12:07:15$"
 
 import MySQLdb as mdb
 import uuid as myUuid
-from utils import auxiliary_functions as af
+import auxiliary_functions as af
 import json
 import logging
 

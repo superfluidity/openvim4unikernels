@@ -34,7 +34,7 @@ import yaml
 import json
 import threading
 import datetime
-from utils import RADclass
+import RADclass
 from jsonschema import validate as js_v, exceptions as js_e
 import host_thread as ht
 from vim_schema import host_new_schema, host_edit_schema, tenant_new_schema, \
