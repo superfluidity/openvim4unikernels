@@ -30,7 +30,7 @@ and host controllers
 
 __author__="Alfonso Tierno"
 __date__ ="$10-jul-2014 12:07:15$"
-__version__="0.4.7-r494"
+__version__="0.4.8-r495"
 version_date="Sep 2016"
 database_version="0.7"      #expected database schema version
 
@@ -49,11 +49,16 @@ import openflow_thread as oft
 import threading
 from vim_schema import config_schema
 import logging
+import logging.handlers as log_handlers
 import imp
+import socket
 
 global config_dic
 global logger
 logger = logging.getLogger('vim')
+
+class LoadConfigurationException(Exception):
+    pass
 
 def load_configuration(configuration_file):
     default_tokens ={'http_port':9080, 'http_host':'localhost', 
@@ -118,16 +123,26 @@ def usage():
     print "      -h|--help: shows this help"
     print "      -p|--port [port_number]: changes port number and overrides the port number in the configuration file (default: 9090)"
     print "      -P|--adminport [port_number]: changes admin port number and overrides the port number in the configuration file (default: 9095)"
+    #print( "      --log-socket-host HOST: send logs to this host")
+    #print( "      --log-socket-port PORT: send logs using this port (default: 9022)")
+    print( "      --log-file FILE: send logs to this file")
     return
 
 
 if __name__=="__main__":
+    hostname = socket.gethostname()
     #streamformat = "%(levelname)s (%(module)s:%(lineno)d) %(message)s"
-    streamformat = "%(asctime)s %(name)s %(levelname)s: %(message)s"
-    logging.basicConfig(format=streamformat, level= logging.DEBUG)
+    log_formatter_complete = logging.Formatter(
+        '%(asctime)s.%(msecs)03d00Z[{host}@openmanod] %(filename)s:%(lineno)s severity:%(levelname)s logger:%(name)s log:%(message)s'.format(host=hostname),
+        datefmt='%Y-%m-%dT%H:%M:%S',
+    )
+    log_format_simple =  "%(asctime)s %(levelname)s  %(name)s %(filename)s:%(lineno)s %(message)s"
+    log_formatter_simple = logging.Formatter(log_format_simple, datefmt='%Y-%m-%dT%H:%M:%S')
+    logging.basicConfig(format=log_format_simple, level= logging.DEBUG)
+    logger = logging.getLogger('openmano')
     logger.setLevel(logging.DEBUG)
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:", ["config", "help", "version", "port", "adminport"])
+        opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:", ["config=", "help", "version", "port=", "adminport=", "log-file="])
     except getopt.GetoptError, err:
         # print help information and exit:
         logger.error("%s. Type -h for help", err) # will print something like "option -a not recognized"
@@ -137,6 +152,7 @@ if __name__=="__main__":
     port=None
     port_admin = None
     config_file = 'openvimd.cfg'
+    log_file = None
 
     for o, a in opts:
         if o in ("-v", "--version"):
@@ -152,6 +168,8 @@ if __name__=="__main__":
             port = a
         elif o in ("-P", "--adminport"):
             port_admin = a
+        elif o == "--log-file":
+            log_file = a
         else:
             assert False, "Unhandled option"
 
@@ -164,8 +182,20 @@ if __name__=="__main__":
             logger.error(config_dic)
             config_dic={}
             exit(-1)
-        logging.basicConfig(level = getattr(logging, config_dic['log_level']))
+        if log_file:
+            try:
+                file_handler= logging.handlers.RotatingFileHandler(log_file, maxBytes=100e6, backupCount=9, delay=0)
+                file_handler.setFormatter(log_formatter_simple)
+                logger.addHandler(file_handler)
+                #logger.debug("moving logs to '%s'", global_config["log_file"])
+                #remove initial stream handler
+                logging.root.removeHandler(logging.root.handlers[0])
+                print ("logging on '{}'".format(log_file))
+            except IOError as e:
+                raise LoadConfigurationException("Cannot open logging file '{}': {}. Check folder exist and permissions".format(log_file, str(e)) ) 
+
         logger.setLevel(getattr(logging, config_dic['log_level']))
+        logger.critical("Starting openvim server command: '%s'", sys.argv[0])
         #override parameters obtained by command line
         if port is not None: config_dic['http_port'] = port
         if port_admin is not None: config_dic['http_admin_port'] = port_admin
@@ -337,6 +367,15 @@ if __name__=="__main__":
 
     except (KeyboardInterrupt, SystemExit):
         pass
+    except SystemExit:
+        pass
+    except getopt.GetoptError as e:
+        logger.critical(str(e)) # will print something like "option -a not recognized"
+        #usage()
+        exit(-1)
+    except LoadConfigurationException as e:
+        logger.critical(str(e))
+        exit(-1)
 
     logger.info('Exiting openvimd')
     threads = config_dic.get('host_threads', {})
