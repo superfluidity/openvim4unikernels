@@ -2,7 +2,7 @@
 
 ##
 # Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
-# This file is part of openmano
+# This file is part of openvim
 # All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -23,7 +23,7 @@
 
 LICENSE_HEAD='/**
 * Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
-* This file is part of openmano
+* This file is part of openvim
 * All Rights Reserved.
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you may

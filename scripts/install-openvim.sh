@@ -2,7 +2,7 @@
 
 ##
 # Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
-# This file is part of openmano
+# This file is part of openvim
 # All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,14 +21,21 @@
 # contact with: nfvlabs@tid.es
 ##
 
-#ONLY TESTED for Ubuntu 14.10 14.04, CentOS7 and RHEL7
+#ONLY TESTED for Ubuntu 14.10 14.04 16.04, CentOS7 and RHEL7
 #Get needed packages, source code and configure to run openvim
 #Ask for database user and password if not provided
-#        $1: database user
-#        $2: database password 
 
 function usage(){
-    echo  -e "usage: sudo $0 [db-user [db-passwd]]\n  Install source code in ./openvim"
+    echo -e "usage: sudo $0 [OPTIONS]"
+    echo -e "Install last stable source code in ./openvim and the needed packages"
+    echo -e "On a Ubuntu 16.04 it configures openvim as a service"
+    echo -e "  OPTIONS"
+    echo -e "     -u USER:    database admin user. 'root' by default. Prompts if needed"
+    echo -e "     -p PASS:    database admin password to be used or installed. Prompts if needed"
+    echo -e "     -q --quiet: install in an unattended mode"
+    echo -e "     -h --help:  show this help"
+    echo -e "     --develop:  install last version for developers, and do not configure as a service"
+    echo -e "     --skip-install-packages: use this option to skip and update and install the requires packages. This avoid wasting time if you are sure requires packages are present for e.g. a previous installation"
 }
 
 function install_packages(){
@@ -49,11 +56,61 @@ function install_packages(){
     done
 }
 
-#check root privileges and non a root user behind
-[ "$1" == "-h" -o "$1" == "--help" ] && usage && exit 0
-[ "$USER" != "root" ] && echo "Needed root privileges" >&2 && usage >&2 && exit -1
-[ -z "$SUDO_USER" -o "$SUDO_USER" = "root" ] && echo "Must be runned with sudo from a non root user"  >&2 && usage >&2 && exit -1
 
+GIT_URL=https://osm.etsi.org/gerrit/osm/openvim.git
+DBUSER="root"
+DBPASSWD=""
+DBPASSWD_PARAM=""
+QUIET_MODE=""
+DEVELOP=""
+NO_PACKAGES=""
+while getopts ":u:p:hiq-:" o; do
+    case "${o}" in
+        u)
+            export DBUSER="$OPTARG"
+            ;;
+        p)
+            export DBPASSWD="$OPTARG"
+            export DBPASSWD_PARAM="-p$OPTARG"
+            ;;
+        q)
+            export QUIET_MODE=yes
+            export DEBIAN_FRONTEND=noninteractive
+            ;;
+        h)
+            usage && exit 0
+            ;;
+        -)
+            [ "${OPTARG}" == "help" ] && usage && exit 0
+            [ "${OPTARG}" == "develop" ] && DEVELOP="y" && continue
+            [ "${OPTARG}" == "quiet" ] && export QUIET_MODE=yes && export DEBIAN_FRONTEND=noninteractive && continue
+            [ "${OPTARG}" == "skip-install-packages" ] && export NO_PACKAGES=yes && continue
+            echo -e "Invalid option: '--$OPTARG'\nTry $0 --help for more information" >&2
+            exit 1
+            ;;
+        \?)
+            echo -e "Invalid option: '-$OPTARG'\nTry $0 --help for more information" >&2
+            exit 1
+            ;;
+        :)
+            echo -e "Option '-$OPTARG' requires an argument\nTry $0 --help for more information" >&2
+            exit 1
+            ;;
+        *)
+            usage >&2
+            exit -1
+            ;;
+    esac
+done
+
+#check root privileges and non a root user behind
+[ "$USER" != "root" ] && echo "Needed root privileges" >&2 && exit -1
+if [[ -z "$SUDO_USER" ]] || [[ "$SUDO_USER" = "root" ]]
+then
+    [[ -z $QUIET_MODE ]] && read -e -p "Install in the root user (y/N)?" KK
+    [[ -z $QUIET_MODE ]] && [[ "$KK" != "y" ]] && [[ "$KK" != "yes" ]] && echo "Cancelled" && exit 1
+    export SUDO_USER=root
+fi
 
 #Discover Linux distribution
 #try redhat type
@@ -62,11 +119,12 @@ function install_packages(){
 [ -f /etc/redhat-release ] || _DISTRO=$(lsb_release -is  2>/dev/null)            
 if [ "$_DISTRO" == "Ubuntu" ]
 then
-    _RELEASE="14"
-    if ! lsb_release -rs | grep -q "14."
-    then 
-        read -e -p "WARNING! Not tested Ubuntu version. Continue assuming a '$_RELEASE' type? (y/N)" KK
-        [ "$KK" != "y" -a  "$KK" != "yes" ] && echo "Cancelled" && exit 0
+    _RELEASE=$(lsb_release -rs)
+    if [[ ${_RELEASE%%.*} != 14 ]] && [[ ${_RELEASE%%.*} != 16 ]]
+    then
+        [[ -z $QUIET_MODE ]] && read -e -p "WARNING! Not tested Ubuntu version. Continue assuming a trusty (14.XX)'? (y/N)" KK
+        [[ -z $QUIET_MODE ]] && [[ "$KK" != "y" ]] && [[ "$KK" != "yes" ]] && echo "Cancelled" && exit 1
+        _RELEASE = 14
     fi
 elif [ "$_DISTRO" == "CentOS" ]
 then
@@ -93,7 +151,8 @@ else  #[ "$_DISTRO" != "Ubuntu" -a "$_DISTRO" != "CentOS" -a "$_DISTRO" != "Red"
 fi
 
 
-
+if [[ -z "$NO_PACKAGES" ]]
+then
 echo '
 #################################################################
 #####               UPDATE REPOSITORIES                     #####
@@ -105,14 +164,24 @@ echo '
 [ "$_DISTRO" == "Red" ] && wget http://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-5.noarch.rpm \
   && sudo rpm -ivh epel-release-7-5.noarch.rpm && sudo yum install -y epel-release && rm -f epel-release-7-5.noarch.rpm
 [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && sudo yum repolist
+fi
 
-
+if [[ -z "$NO_PACKAGES" ]]
+then
 echo '
 #################################################################
 #####               INSTALL REQUIRED PACKAGES               #####
 #################################################################'
-[ "$_DISTRO" == "Ubuntu" ] && install_packages "mysql-server"
-[ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_packages "mariadb mariadb-server"
+[ "$_DISTRO" == "Ubuntu" ] && install_packages "git screen wget mysql-server"
+[ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_packages "git screen wget mariadb mariadb-server"
+
+if [[ "$_DISTRO" == "Ubuntu" ]]
+then
+    #start services. By default CentOS does not start services
+    service mysql start >> /dev/null
+    # try to set admin password, ignore if fails
+    [[ -n $DBPASSWD ]] && mysqladmin -u $DBUSER -s password $DBPASSWD
+fi
 
 if [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ]
 then
@@ -130,40 +199,46 @@ then
         firewall-cmd --permanent --zone=public --add-service=https &&
         firewall-cmd --reload
 fi
+fi  #[[ -z "$NO_PACKAGES" ]]
 
-#check and ask for database user password. Must be done after database instalation
-[ -n "$1" ] && DBUSER=$1
-[ -z "$1" ] && DBUSER=root
-[ -n "$2" ] && DBPASSWD="-p$2"
-[ -z "$2" ] && DBPASSWD=""
-echo -e "\nCheking database connection and ask for credentials"
-while !  echo "" | mysql -u$DBUSER $DBPASSWD
-do
+#check and ask for database user password. Must be done after database installation
+if [[ -n $QUIET_MODE ]]
+then
+    echo -e "\nCheking database connection and ask for credentials"
+    while ! mysqladmin -s -u$DBUSER $DBPASSWD_PARAM ping
+    do
         [ -n "$logintry" ] &&  echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
         [ -z "$logintry" ] &&  echo -e "\nProvide database credentials"
         read -e -p "database user? ($DBUSER) " DBUSER_
         [ -n "$DBUSER_" ] && DBUSER=$DBUSER_
         read -e -s -p "database password? (Enter for not using password) " DBPASSWD_
-        [ -n "$DBPASSWD_" ] && DBPASSWD="-p$DBPASSWD_"
-        [ -z "$DBPASSWD_" ] && DBPASSWD=""
+        [ -n "$DBPASSWD_" ] && DBPASSWD="$DBPASSWD_" && DBPASSWD_PARAM="-p$DBPASSWD_"
+        [ -z "$DBPASSWD_" ] && DBPASSWD=""           && DBPASSWD_PARAM=""
         logintry="yes"
-done
+    done
+fi
 
+if [[ -z "$NO_PACKAGES" ]]
+then
 echo '
 #################################################################
 #####               INSTALL PYTHON PACKAGES                 #####
 #################################################################'
-[ "$_DISTRO" == "Ubuntu" ] && install_packages "python-yaml python-libvirt python-bottle python-mysqldb python-jsonschema python-paramiko python-argcomplete python-requests git screen wget"
-[ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_packages "PyYAML libvirt-python MySQL-python python-jsonschema python-paramiko python-argcomplete python-requests git screen wget"
+[ "$_DISTRO" == "Ubuntu" ] && install_packages "python-yaml python-libvirt python-bottle python-mysqldb python-jsonschema python-paramiko python-argcomplete python-requests"
+[ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_packages "PyYAML libvirt-python MySQL-python python-jsonschema python-paramiko python-argcomplete python-requests"
 
 #The only way to install python-bottle on Centos7 is with easy_install or pip
 [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && easy_install -U bottle
+
+fi  #[[ -z "$NO_PACKAGES" ]]
 
 echo '
 #################################################################
 #####                 DOWNLOAD SOURCE                       #####
 #################################################################'
-su $SUDO_USER -c 'git clone https://github.com/nfvlabs/openvim.git openvim'
+su $SUDO_USER -c 'git clone '"${GIT_URL}"' openvim'
+#[[ -z $DEVELOP ]] && su $SUDO_USER -c 'git checkout <tag version>'
+
 #Unncoment to use a concrete branch, if not main branch 
 #pushd openvim
 #su $SUDO_USER -c 'git checkout v0.4'
@@ -173,13 +248,14 @@ echo '
 #################################################################
 #####               CREATE DATABASE                         #####
 #################################################################'
-mysqladmin -u$DBUSER $DBPASSWD create vim_db
+mysqladmin -u$DBUSER $DBPASSWD_PARAM -s create vim_db || ! echo "Cannot create database vim_db" || exit 1
 
-echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"     | mysql -u$DBUSER $DBPASSWD
-echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';"   | mysql -u$DBUSER $DBPASSWD
+echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"     | mysql -u$DBUSER $DBPASSWD_PARAM || ! echo "Failed while creating user vim at dabase" || exit 1
+echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';"   | mysql -u$DBUSER $DBPASSWD_PARAM || ! echo "Failed while creating user vim at dabase" || exit 1
+echo " Database 'vim_db' created, user 'vim' password 'vimpw'"
 
-echo "vim database"
-su $SUDO_USER -c './openvim/database_utils/init_vim_db.sh -u vim -p vimpw'
+
+su $SUDO_USER -c './openvim/database_utils/init_vim_db.sh -u vim -p vimpw'  || ! echo "Failed while creating user vim at dabase" || exit 1
 
 
 if [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ]
@@ -214,24 +290,24 @@ fi
 
 echo '
 #################################################################
-#####        CONFIGURE openvim CLIENTS                      #####
+#####        CONFIGURE openvim CLIENT                       #####
 #################################################################'
 #creates a link at ~/bin
 su $SUDO_USER -c 'mkdir -p ~/bin'
-rm -f /home/${SUDO_USER}/bin/openvim
-rm -f /home/${SUDO_USER}/bin/openflow
-rm -f /home/${SUDO_USER}/bin/service-openvim
-rm -f /home/${SUDO_USER}/bin/initopenvim
-rm -f /home/${SUDO_USER}/bin/service-floodlight
-rm -f /home/${SUDO_USER}/bin/service-opendaylight
-rm -f /home/${SUDO_USER}/bin/get_dhcp_lease.sh
-ln -s ${PWD}/openvim/openvim   /home/${SUDO_USER}/bin/openvim
-ln -s ${PWD}/openvim/openflow  /home/${SUDO_USER}/bin/openflow
-ln -s ${PWD}/openvim/scripts/service-openvim.sh  /home/${SUDO_USER}/bin/service-openvim
-ln -s ${PWD}/openvim/scripts/initopenvim.sh  /home/${SUDO_USER}/bin/initopenvim
-ln -s ${PWD}/openvim/scripts/service-floodlight.sh  /home/${SUDO_USER}/bin/service-floodlight
-ln -s ${PWD}/openvim/scripts/service-opendaylight.sh  /home/${SUDO_USER}/bin/service-opendaylight
-ln -s ${PWD}/openvim/scripts/get_dhcp_lease.sh  /home/${SUDO_USER}/bin/get_dhcp_lease.sh
+su $SUDO_USER -c 'rm -f ${HOME}/bin/openvim'
+su $SUDO_USER -c 'rm -f ${HOME}/bin/openflow'
+su $SUDO_USER -c 'rm -f ${HOME}/bin/service-openvim'
+su $SUDO_USER -c 'rm -f ${HOME}/bin/initopenvim'
+su $SUDO_USER -c 'rm -f ${HOME}/bin/service-floodlight'
+su $SUDO_USER -c 'rm -f ${HOME}/bin/service-opendaylight'
+su $SUDO_USER -c 'rm -f ${HOME}/bin/get_dhcp_lease.sh'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/openvim   ${HOME}/bin/openvim'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/openflow  ${HOME}/bin/openflow'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/service-openvim.sh  ${HOME}/bin/service-openvim'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/initopenvim.sh  ${HOME}/bin/initopenvim'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/service-floodlight.sh  ${HOME}/bin/service-floodlight'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/service-opendaylight.sh  ${HOME}/bin/service-opendaylight'
+su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/get_dhcp_lease.sh  ${HOME}/bin/get_dhcp_lease.sh'
 
 #insert /home/<user>/bin in the PATH
 #skiped because normally this is done authomatically when ~/bin exist
@@ -240,6 +316,15 @@ ln -s ${PWD}/openvim/scripts/get_dhcp_lease.sh  /home/${SUDO_USER}/bin/get_dhcp_
 #    echo "    inserting /home/$SUDO_USER/bin in the PATH at .bashrc"
 #    su $SUDO_USER -c 'echo "PATH=\$PATH:/home/\${USER}/bin" >> ~/.bashrc'
 #fi
+
+if [[ $SUDO_USER == root ]]
+then
+    if ! echo $PATH | grep -q "${HOME}/bin"
+    then
+        echo "PATH=\$PATH:\${HOME}/bin" >> ${HOME}/.bashrc
+    fi
+fi
+
 
 #configure arg-autocomplete for this user
 #in case of minmal instalation this package is not installed by default
@@ -252,9 +337,28 @@ then
     su $SUDO_USER -c 'echo ". /home/${USER}/.bash_completion.d/python-argcomplete.sh" >> ~/.bashrc'
 fi
 
-echo
-echo "Done!  you may need to logout and login again for loading the configuration"
-echo " Run './openvim/scripts/service-openvim.sh start' for starting openvim in a screen"
 
 
+if [[ "$_DISTRO" == "Ubuntu" ]] &&  [[ ${_RELEASE%%.*} == 16 ]] && [[ -z $DEVELOP ]]
+then
+echo '
+#################################################################
+#####             CONFIGURE OPENMANO SERVICE                #####
+#################################################################'
 
+    ./openvim/scripts/install-service-openvim.sh -f openvim #-u $SUDO_USER
+#    alias service-openvim="service openvim"
+#    echo 'alias service-openvim="service openvim"' >> ${HOME}/.bashrc
+
+    echo
+    echo "Done!  you may need to logout and login again for loading client configuration"
+    echo " Manage server with 'service openvim start|stop|status|...' "
+
+
+else
+
+    echo
+    echo "Done!  you may need to logout and login again for loading client configuration"
+    echo " Run './openvim/scripts/service-openvim.sh start' for starting openvim in a screen"
+
+fi

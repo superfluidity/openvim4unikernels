@@ -2,7 +2,7 @@
 
 ##
 # Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
-# This file is part of openmano
+# This file is part of openvim
 # All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -173,10 +173,10 @@ then
 elif [[ $action == "create" ]]
 then
     echo "Adding example hosts"
-    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example0.json || ! echo "fail" >&2 || $_exit 1
-    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example1.json || ! echo "fail" >&2 || $_exit 1
-    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example2.json || ! echo "fail" >&2 || $_exit 1
-    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example3.json || ! echo "fail" >&2 || $_exit 1
+    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example0.yaml || ! echo "fail" >&2 || $_exit 1
+    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example1.yaml || ! echo "fail" >&2 || $_exit 1
+    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example2.yaml || ! echo "fail" >&2 || $_exit 1
+    ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example3.yaml || ! echo "fail" >&2 || $_exit 1
     echo "Adding example nets"
     ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example0.yaml || ! echo "fail" >&2 || $_exit 1
     ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example1.yaml || ! echo "fail" >&2 || $_exit 1
