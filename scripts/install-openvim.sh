@@ -346,7 +346,7 @@ echo '
 #####             CONFIGURE OPENMANO SERVICE                #####
 #################################################################'
 
-    ./openvim/scripts/install-service-openvim.sh -f openvim #-u $SUDO_USER
+    ./openvim/scripts/install-openvim-service.sh -f openvim #-u $SUDO_USER
 #    alias service-openvim="service openvim"
 #    echo 'alias service-openvim="service openvim"' >> ${HOME}/.bashrc
 
