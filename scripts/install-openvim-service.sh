@@ -37,7 +37,7 @@ function usage(){
 
 function uninstall(){
     service openvim stop
-    for file in /opt/openvim /etc/default/openvimd.cfg /var/log/openvim /etc/systemd/system/openvim.service
+    for file in /opt/openvim /etc/default/openvimd.cfg /var/log/openvim /etc/systemd/system/openvim.service /usr/sbin/openvim
     do
         rm -rf $file || ! echo "Can not delete '$file'. Needed root privileges?" >&2 || exit 1
     done
@@ -123,9 +123,11 @@ rm -f /etc/default/openvimd.cfg
 rm -f /var/log/openvim
 cp -r $FILE /opt/openvim         || ! echo $BAD_PATH_ERROR >&2 || exit 1
 mkdir -p /opt/openvim/logs
+rm -rf /usr/sbin/openvim
 #cp ${FILE}/openvim /usr/sbin/    || ! echo $BAD_PATH_ERROR >&2 || exit 1
 ln -s /opt/openvim/openvimd.cfg /etc/default/openvimd.cfg  || echo "warning cannot create link '/etc/default/openvimd.cfg'"
 ln -s /opt/openvim/logs /var/log/openvim  || echo "warning cannot create link '/var/log/openvim'"
+ln -s /opt/openvim/openvim /usr/sbin/openvim
 
 chown $USER_OWNER /opt/openvim/openvimd.cfg
 chown -R $USER_OWNER /opt/openvim
