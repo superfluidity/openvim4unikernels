@@ -119,10 +119,11 @@ def create_database_connection(config_dic):
 def usage():
     print "Usage: ", sys.argv[0], "[options]"
     print "      -v|--version: prints current version"
-    print "      -c|--config [configuration_file]: loads the configuration file (default: openvimd.cfg)"
+    print "      -c|--config FILE: loads the configuration file (default: openvimd.cfg)"
     print "      -h|--help: shows this help"
-    print "      -p|--port [port_number]: changes port number and overrides the port number in the configuration file (default: 9090)"
-    print "      -P|--adminport [port_number]: changes admin port number and overrides the port number in the configuration file (default: 9095)"
+    print "      -p|--port PORT: changes port number and overrides the port number in the configuration file (default: 908)"
+    print "      -P|--adminport PORT: changes admin port number and overrides the port number in the configuration file (default: not listen)"
+    print "      --dbname NAME: changes db_name and overrides the db_name in the configuration file"
     #print( "      --log-socket-host HOST: send logs to this host")
     #print( "      --log-socket-port PORT: send logs using this port (default: 9022)")
     print( "      --log-file FILE: send logs to this file")
@@ -142,7 +143,7 @@ if __name__=="__main__":
     logger = logging.getLogger('openmano')
     logger.setLevel(logging.DEBUG)
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:", ["config=", "help", "version", "port=", "adminport=", "log-file="])
+        opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:", ["config=", "help", "version", "port=", "adminport=", "log-file=", "dbname="])
     except getopt.GetoptError, err:
         # print help information and exit:
         logger.error("%s. Type -h for help", err) # will print something like "option -a not recognized"
@@ -153,6 +154,7 @@ if __name__=="__main__":
     port_admin = None
     config_file = 'openvimd.cfg'
     log_file = None
+    db_name = None
 
     for o, a in opts:
         if o in ("-v", "--version"):
@@ -168,6 +170,8 @@ if __name__=="__main__":
             port = a
         elif o in ("-P", "--adminport"):
             port_admin = a
+        elif o in ("-P", "--dbname"):
+            db_name = a
         elif o == "--log-file":
             log_file = a
         else:
@@ -197,8 +201,12 @@ if __name__=="__main__":
         logger.setLevel(getattr(logging, config_dic['log_level']))
         logger.critical("Starting openvim server command: '%s'", sys.argv[0])
         #override parameters obtained by command line
-        if port is not None: config_dic['http_port'] = port
-        if port_admin is not None: config_dic['http_admin_port'] = port_admin
+        if port: 
+            config_dic['http_port'] = port
+        if port_admin:
+            config_dic['http_admin_port'] = port_admin
+        if db_name: 
+            config_dic['db_name'] = db_name
         
         #check mode
         if 'mode' not in config_dic:
