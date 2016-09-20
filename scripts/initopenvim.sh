@@ -25,6 +25,8 @@
 #stopping on an error
 #WARNING: It destroy the database content
 
+DIRNAME=$(readlink -f ${BASH_SOURCE[0]})
+DIRNAME=$(dirname $DIRNAME )
 
 function usage(){
     echo -e "usage: ${BASH_SOURCE[0]} [OPTIONS] <action>\n  Deletes openvim content and add fake hosts, networks"
@@ -36,6 +38,10 @@ function usage(){
     echo -e "  OPTIONS:"
     echo -e "    -f --force : does not prompt for confirmation"
     echo -e "    -d --delete : same to action delete-all"
+    echo -e "    -p --port PORT : port to start openvim service"
+    echo -e "    -P --admin-port PORT : administrator port to start openvim service"
+    echo -e "    --screen-name NAME : screen name to launch openvim (default vim)"
+    echo -e "    --dbname NAME : database name to use (default vim_db)"
     echo -e "    --insert-bashrc  insert the created tenant variables at"
     echo -e "                     ~/.bashrc to be available by openvim CLI"
     echo -e "    -h --help  : shows this help"
@@ -50,48 +56,54 @@ function is_valid_uuid(){
 #detect if is called with a source to use the 'exit'/'return' command for exiting
 [[ ${BASH_SOURCE[0]} != $0 ]] && _exit="return" || _exit="exit"
 
-#check correct arguments
-force=""
-action_list=""
-insert_bashrc=""
 
-while [[ $# -gt 0 ]]
+#process options
+source ${DIRNAME}/get-options.sh "force:f delete:d delete-all port:p= admin-port:P= screen-name= help:h dbname= insert-bashrc" $* || $_exit 1
+
+
+#check correct arguments
+action_list=""
+for param in $params
 do
-    argument="$1"
-    shift
-    if [[ $argument == reset ]] || [[ $argument == create ]] || [[ $argument == delete ]] || [[ $argument == delete-all ]]
+    if [[ "$param" == reset ]] || [[ "$param" == create ]] || [[ "$param" == delete ]] || [[ "$param" == delete-all ]]
     then
         action_list="$action_list $argument"
         continue
-    #short options
-    elif [[ ${argument:0:1} == "-" ]] && [[ ${argument:1:1} != "-" ]] && [[ ${#argument} -ge 2 ]]
-    then
-        index=0
-        while index=$((index+1)) && [[ $index -lt ${#argument} ]]
-        do
-            [[ ${argument:$index:1} == h ]]  && usage   && $_exit 0
-            [[ ${argument:$index:1} == f ]]  && force=y && continue
-            [[ ${argument:$index:1} == d ]]  && action_list="delete-all $action_list" && continue
-            echo "invalid option '${argument:$index:1}'?  Type -h for help" >&2 && $_exit 1
-        done
-        continue
+    else
+        echo "invalid argument '$param'?  Type -h for help" >&2 && $_exit 1
     fi
-    #long options
-    [[ $argument == --help ]]   && usage   && $_exit 0
-    [[ $argument == --force ]]  && force=y && continue
-    [[ $argument == --delete ]] && action_list="delete-all $action_list" && continue
-    [[ $argument == --insert-bashrc ]] && insert_bashrc=y && continue
-    echo "invalid argument '$argument'?  Type -h for help" >&2 && $_exit 1
 done
+
+#help
+[[ -n "$option_help" ]] && usage   && $_exit 0
+
+#check numeric values for port
+[[ -n "$option_port" ]] && ( [[ "$option_port" -lt 1 ]] || [[ "$option_port" -gt 65535 ]] ) && echo "Option '-p' or '--port' requires a valid numeric argument" >&2  && $_exit 1
+[[ -n "$option_admin_port" ]]  && ( [[ "$option_admin_port" -lt 1 ]] || [[ "$option_admin_port" -gt 65535 ]] ) && echo "Option '-P' or '--admin-port' requieres a valid numeric argument"  >&2 && $_exit 1
+
+[[ -n "$option_screen_name" ]] && screen_name="$option_screen_name" && screen_name_param=" --screen-name $screen_name"
+[[ -z "$option_screen_name" ]] && screen_name=vim                   && screen_name_param="" #default value
+
+[[ -n "$option_delete" ]] &&   action_list="delete-all $action_list"
+
+openvim_param=" --"
+[[ -n "$option_port" ]]       && openvim_param="$openvim_param -p $option_port"
+[[ -n "$option_admin_port" ]] && openvim_param="$openvim_param -P $option_admin_port"
+[[ -n "$option_dbname" ]]     && openvim_param="$openvim_param --dbname $option_dbname"
+[[ $openvim_param = " --" ]]  && openvim_param=""
+db_name=vim_db  #default value 
+[[ -n "$option_dbname" ]]     && db_name="$option_dbname"
 
 DIRNAME=$(dirname $(readlink -f ${BASH_SOURCE[0]}))
 DIRvim=$(dirname $DIRNAME)
 export OPENVIM_HOST=localhost
-export OPENVIM_PORT=9080
-[[ $insert_bashrc == y ]] && echo -e "\nexport OPENVIM_HOST=localhost"  >> ~/.bashrc
-[[ $insert_bashrc == y ]] && echo -e "\nexport OPENVIM_PORT=9080"  >> ~/.bashrc
+[[ -n "$option_port" ]]       && export OPENVIM_PORT=$option_port
+[[ -n "$option_admin_port" ]] && export OPENVIM_ADMIN_PORT=$option_admin_port
+
+[[ -n "$option_insert_bashrc" ]] && echo -e "\nexport OPENVIM_HOST=localhost"  >> ~/.bashrc
+[[ -n "$option_insert_bashrc" ]] && echo -e "\nexport OPENVIM_PORT=9080"  >> ~/.bashrc
 #by default action should be reset and create
-[[ -z $action_list ]]  && action_list="reset create"
+[[ -z "$action_list" ]]  && action_list="reset create"
 
 
 for action in $action_list
@@ -100,16 +112,16 @@ if [[ $action == "reset" ]]
 then
     #ask for confirmation if argument is not -f --force
     force_="y"
-    [[ $force  != y ]] && read -e -p "WARNING: openvim database content will be lost!!!  Continue(y/N)" force_
+    [[ -z "$option_force" ]] && read -e -p "WARNING: openvim database content will be lost!!!  Continue(y/N)" force_
     [[ $force_ != y ]] && [[ $force_ != yes ]] && echo "aborted!" && $_exit
     echo "deleting deployed vm"
     ${DIRvim}/openvim vm-delete -f | grep -q deleted && sleep 10 #give some time to get virtual machines deleted
-    echo "Stopping openvim"
-    $DIRNAME/service-openvim.sh stop
-    echo "Initializing databases"
-    $DIRvim/database_utils/init_vim_db.sh -u vim -p vimpw
-    echo "Starting openvim"
-    $DIRNAME/service-openvim.sh start
+    echo "Stopping openvim${screen_name_param}${openvim_param}"
+    $DIRNAME/service-openvim.sh stop${screen_name_param}${openvim_param} 
+    echo "Initializing databases $db_name"
+    $DIRvim/database_utils/init_vim_db.sh -u vim -p vimpw -d $db_name
+    echo "Starting openvim${screen_name_param}${openvim_param}"
+    $DIRNAME/service-openvim.sh start${screen_name_param}${openvim_param}
 
 elif [[ $action == delete-all ]] 
 then
@@ -124,8 +136,8 @@ then
             items=`${DIRvim}/openvim $what-list | awk '/^ *[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12} +/{print $1}'`
             if [[ -n $items ]]
             then 
-                [[ $force == y ]] && echo deleting openvim ${what}s from tenant ${t_name}
-                [[ $force != y ]] && read -e -p "Delete openvim ${what}s from tenant ${t_name}?(y/N) " force_
+                [[ $option_force == "-" ]] && echo deleting openvim ${what}s from tenant ${t_name}
+                [[ $option_force != "-" ]] && read -e -p "Delete openvim ${what}s from tenant ${t_name}?(y/N) " force_
                 [[ $force_ != y ]] && [[ $force_ != yes ]] && echo "aborted!" && $_exit
                 for item in $items
                 do
@@ -140,8 +152,8 @@ then
             items=`${DIRvim}/openvim $what-list | awk '/^ *[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12} +/{print $1}'`
             if [[ -n $items ]]
             then
-                [[ $force == y ]] && echo deleting openvim ${what}s
-                [[ $force != y ]] && read -e -p "Delete openvim ${what}s?(y/N) " force_
+                [[ $option_force == "-" ]] && echo deleting openvim ${what}s
+                [[ $option_force != "-" ]] && read -e -p "Delete openvim ${what}s?(y/N) " force_
                 [[ $force_ != y ]] && [[ $force_ != yes ]] && echo "aborted!" && $_exit
                 for item in $items
                 do
@@ -190,7 +202,7 @@ then
     ! is_valid_uuid $vimtenant && echo "FAIL" && echo "    $result" && $_exit 1
     echo "  $vimtenant"
     export OPENVIM_TENANT=$vimtenant
-    [[ $insert_bashrc == y ]] && echo -e "\nexport OPENVIM_TENANT=$vimtenant" >> ~/.bashrc
+    [[ -n "$option_insert_bashrc" ]] && echo -e "\nexport OPENVIM_TENANT=$vimtenant" >> ~/.bashrc
 
     echo
     #echo "Check virtual machines are deployed"
