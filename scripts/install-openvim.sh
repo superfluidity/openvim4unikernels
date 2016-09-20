@@ -331,10 +331,10 @@ fi
 [[ "$_DISTRO" == "CentOS" || "$_DISTRO" == "Red" ]] && yum install -y bash-completion
 #su $SUDO_USER -c 'mkdir -p ~/.bash_completion.d'
 su $SUDO_USER -c 'activate-global-python-argcomplete --user'
-if ! grep -q bash_completion.d/python-argcomplete.sh /home/${SUDO_USER}/.bashrc
+if ! grep -q bash_completion.d/python-argcomplete.sh ${HOME}/.bashrc
 then
     echo "    inserting .bash_completion.d/python-argcomplete.sh execution at .bashrc"
-    su $SUDO_USER -c 'echo ". /home/${USER}/.bash_completion.d/python-argcomplete.sh" >> ~/.bashrc'
+    su $SUDO_USER -c 'echo ". ${HOME}/.bash_completion.d/python-argcomplete.sh" >> ~/.bashrc'
 fi
 
 
@@ -343,7 +343,7 @@ if [[ "$_DISTRO" == "Ubuntu" ]] &&  [[ ${_RELEASE%%.*} == 16 ]] && [[ -z $DEVELO
 then
 echo '
 #################################################################
-#####             CONFIGURE OPENMANO SERVICE                #####
+#####             CONFIGURE OPENVIM SERVICE                 #####
 #################################################################'
 
     ./openvim/scripts/install-openvim-service.sh -f openvim #-u $SUDO_USER
