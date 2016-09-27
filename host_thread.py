@@ -757,9 +757,14 @@ class host_thread(threading.Thread):
             raise paramiko.ssh_exception.SSHException("Error deleting file: " + error_msg)
 
     def copy_file(self, source, destination, perserve_time=True):
-        command = 'cp --no-preserve=mode '
-        if perserve_time: command += '--preserve=timestamps '
-        command +=  source + ' '  + destination
+        if source[0:4]=="http":
+            command = "wget --no-verbose -O '{dst}' '{src}' 2>'{dst_result}' || cat '{dst_result}' >&2 && rm '{dst_result}'".format(
+                dst=destination, src=source, dst_result=destination + ".result" )
+        else:
+            command = 'cp --no-preserve=mode'
+            if perserve_time:
+                command += ' --preserve=timestamps'
+            command +=  " '{}' '{}'".format(source, destination)
         print self.name, ': command:', command
         (_, _, stderr) = self.ssh_conn.exec_command(command)
         error_msg = stderr.read()
@@ -783,24 +788,29 @@ class host_thread(threading.Thread):
         use_incremental_out = use_incremental
         new_backing_file = None
         local_file = None
+        file_from_local = True
 
         #in case incremental use is not decided, take the decision depending on the image
         #avoid the use of incremental if this image is already incremental
-        qemu_remote_info = self.qemu_get_info(remote_file)
+        if remote_file[0:4] == "http":
+            file_from_local = False
+        if file_from_local:
+            qemu_remote_info = self.qemu_get_info(remote_file)
         if use_incremental_out==None:
-            use_incremental_out = not 'backing file' in qemu_remote_info
+            use_incremental_out = not ( file_from_local and 'backing file' in qemu_remote_info)
         #copy recursivelly the backing files
-        if 'backing file' in qemu_remote_info:
+        if  file_from_local and 'backing file' in qemu_remote_info:
             new_backing_file, _, _ = self.copy_remote_file(qemu_remote_info['backing file'], True)
         
         #check if remote file is present locally
         if use_incremental_out and remote_file in self.localinfo['files']:
             local_file = self.localinfo['files'][remote_file]
             local_file_info =  self.get_file_info(local_file)
-            remote_file_info = self.get_file_info(remote_file)
+            if file_from_local:
+                remote_file_info = self.get_file_info(remote_file)
             if local_file_info == None:
                 local_file = None
-            elif local_file_info[4]!=remote_file_info[4] or local_file_info[5]!=remote_file_info[5]:
+            elif file_from_local and (local_file_info[4]!=remote_file_info[4] or local_file_info[5]!=remote_file_info[5]):
                 #local copy of file not valid because date or size are different. 
                 #TODO DELETE local file if this file is not used by any active virtual machine
                 try:
