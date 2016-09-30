@@ -34,6 +34,8 @@ import yaml
 import json
 import threading
 import datetime
+import hashlib
+import os
 import RADclass
 from jsonschema import validate as js_v, exceptions as js_e
 import host_thread as ht
@@ -61,6 +63,12 @@ HTTP_Conflict =             409
 HTTP_Service_Unavailable =  503 
 HTTP_Internal_Server_Error= 500 
 
+def md5(fname):
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
 
 def check_extended(extended, allow_net_attach=False):
     '''Makes and extra checking of extended input that cannot be done using jsonschema
@@ -1077,6 +1085,20 @@ def http_post_images(tenant_id):
     metadata_dict = http_content['image'].pop('metadata', None)
     if metadata_dict is not None: 
         http_content['image']['metadata'] = json.dumps(metadata_dict)
+    #calculate checksum
+    host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
+    try:
+        image_file = http_content['image'].get('path',None)
+        if os.path.exists(image_file):
+            http_content['image']['checksum'] = md5(image_file)
+        else:
+            if not host_test_mode:
+                content = "Image file not found"
+                print "http_post_images error: %d %s" % (HTTP_Bad_Request, content)
+                bottle.abort(HTTP_Bad_Request, content)
+    except Exception as e:
+        print "ERROR. Unexpected exception: %s" % (str(e))
+        bottle.abort(HTTP_Internal_Server_Error, type(e).__name__ + ": " + str(e))
     #insert in data base
     result, content = my.db.new_image(http_content['image'], tenant_id)
     if result >= 0:
