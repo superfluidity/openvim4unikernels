@@ -60,14 +60,13 @@ function is_valid_uuid(){
 #process options
 source ${DIRNAME}/get-options.sh "force:f delete:d delete-all port:p= admin-port:P= screen-name= help:h dbname= insert-bashrc" $* || $_exit 1
 
-
 #check correct arguments
 action_list=""
 for param in $params
 do
     if [[ "$param" == reset ]] || [[ "$param" == create ]] || [[ "$param" == delete ]] || [[ "$param" == delete-all ]]
     then
-        action_list="$action_list $argument"
+        action_list="$action_list $param"
         continue
     else
         echo "invalid argument '$param'?  Type -h for help" >&2 && $_exit 1
