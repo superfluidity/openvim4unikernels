@@ -237,7 +237,7 @@ echo '
 #####                 DOWNLOAD SOURCE                       #####
 #################################################################'
 su $SUDO_USER -c 'git clone '"${GIT_URL}"' openvim'
-#[[ -z $DEVELOP ]] && su $SUDO_USER -c 'git checkout <tag version>'
+[[ -z $DEVELOP ]] && su $SUDO_USER -c 'cd openvim; git checkout tags/v1.0; cd ..'
 
 #Unncoment to use a concrete branch, if not main branch 
 #pushd openvim
