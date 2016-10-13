@@ -205,7 +205,7 @@ fi  #[[ -z "$NO_PACKAGES" ]]
 if [[ -n $QUIET_MODE ]]
 then
     echo -e "\nCheking database connection and ask for credentials"
-    while ! mysqladmin -s -u$DBUSER $DBPASSWD_PARAM ping
+    while ! mysqladmin -s -u$DBUSER $DBPASSWD_PARAM status >/dev/null
     do
         [ -n "$logintry" ] &&  echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
         [ -z "$logintry" ] &&  echo -e "\nProvide database credentials"
