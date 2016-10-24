@@ -40,7 +40,7 @@ function usage(){
     echo -e "  If openvim_version is not provided it tries to get from openvimd.py using relative path"
     echo -e "  OPTIONS"
     echo -e "     -u USER  database user. '$DBUSER' by default. Prompts if DB access fails"
-    echo -e "     -p PASS  database password. 'No password' by default. Prompts if DB access fails"
+    echo -e "     -p PASS  database password. 'No password' or 'vimpw' by default. Prompts if DB access fails"
     echo -e "     -P PORT  database port. '$DBPORT' by default"
     echo -e "     -h HOST  database host. '$DBHOST' by default"
     echo -e "     -d NAME  database name. '$DBNAME' by default.  Prompts if DB access fails"
@@ -85,40 +85,58 @@ while getopts ":u:p:P:h:d:-:" o; do
 done
 shift $((OPTIND-1))
 
-#check and ask for database user password
-DBUSER_="-u$DBUSER"
-DBPASS_=""
-[ -n "$DBPASS" ] && DBPASS_="-p$DBPASS"
+#Creating temporary file
+TEMPFILE="$(mktemp -q --tmpdir "initmanodb.XXXXXX")"
+trap 'rm -f "$TEMPFILE"' EXIT
+chmod 0600 "$TEMPFILE"
+
+#if password is missing, before prompting for it try without password and with "manopw"
 DBHOST_="-h$DBHOST"
 DBPORT_="-P$DBPORT"
-while !  echo ";" | mysql $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_ $DBNAME >/dev/null 2>&1
+DEF_EXTRA_FILE_PARAM="--defaults-extra-file=$TEMPFILE"
+if [ -z "${DBPASS}" ]
+then
+    password_ok=""
+    echo -e "[client]\nuser='${DBUSER}'\npassword='vimpw'" > "$TEMPFILE"
+    mysql --defaults-extra-file="$TEMPFILE" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1 && DBPASS="vimpw"
+    echo -e "[client]\nuser='${DBUSER}'\npassword=''" > "$TEMPFILE"
+    mysql --defaults-extra-file="$TEMPFILE" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1 && DBPASS=""
+fi
+echo -e "[client]\nuser='${DBUSER}'\npassword='${DBPASS}'" > "$TEMPFILE"
+
+#check and ask for database user password
+while ! mysql "$DEF_EXTRA_FILE_PARAM" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1
 do
         [ -n "$logintry" ] &&  echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
         [ -z "$logintry" ] &&  echo -e "\nProvide database name and credentials"
         read -e -p "mysql database name($DBNAME): " KK
         [ -n "$KK" ] && DBNAME="$KK"
         read -e -p "mysql user($DBUSER): " KK
-        [ -n "$KK" ] && DBUSER="$KK" && DBUSER_="-u$DBUSER"
+        [ -n "$KK" ] && DBUSER="$KK"
         read -e -s -p "mysql password: " DBPASS
-        [ -n "$DBPASS" ] && DBPASS_="-p$DBPASS"
-        [ -z "$DBPASS" ] && DBPASS_=""
-        logintry="yes":
+        echo -e "[client]\nuser='${DBUSER}'\npassword='${DBPASS}'" > "$TEMPFILE"
+        logintry="yes"
         echo
 done
 
+DBCMD="mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_ $DBNAME"
+DBUSER_="-u$DBUSER"
+DBPASS_="-p$DBPASS"
+
+
 echo "    loading ${DIRNAME}/vim_db_structure.sql"
-sed -e "s/vim_db/$DBNAME/" ${DIRNAME}/vim_db_structure.sql |  mysql  $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_ 
+sed -e "s/vim_db/$DBNAME/" ${DIRNAME}/vim_db_structure.sql |  mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_
 
 echo "    migrage database version"
 ${DIRNAME}/migrate_vim_db.sh $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_ -d$DBNAME $1
 
 echo  "    loading ${DIRNAME}/host_ranking.sql"
-mysql $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_  $DBNAME < ${DIRNAME}/host_ranking.sql
+mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_ $DBNAME < ${DIRNAME}/host_ranking.sql
 
 echo  "    loading ${DIRNAME}/of_ports_pci_correspondence.sql"
-mysql $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_  $DBNAME < ${DIRNAME}/of_ports_pci_correspondence.sql
+mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_ $DBNAME < ${DIRNAME}/of_ports_pci_correspondence.sql
 #mysql -h $HOST -P $PORT -u $MUSER -p$MPASS $MDB < ${DIRNAME}/of_ports_pci_correspondence_centos.sql
 
 echo  "    loading ${DIRNAME}/nets.sql"
-mysql $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_  $DBNAME < ${DIRNAME}/nets.sql
+mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_ $DBNAME < ${DIRNAME}/nets.sql
 
