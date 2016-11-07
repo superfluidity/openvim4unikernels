@@ -30,6 +30,7 @@ __author__="Alfonso Tierno"
 __date__ ="$10-jul-2014 12:07:15$"
 
 import bottle
+import urlparse
 import yaml
 import json
 import threading
@@ -450,6 +451,18 @@ def check_valid_uuid(uuid):
         return True
     except js_e.ValidationError:
         return False
+
+
+def is_url(url):
+    '''
+    Check if string value is a well-wormed url
+    :param url: string url
+    :return: True if is a valid url, False if is not well-formed
+    '''
+
+    parsed_url = urlparse.urlparse(url)
+    return parsed_url
+
 
 @bottle.error(400)
 @bottle.error(401) 
@@ -1091,6 +1104,8 @@ def http_post_images(tenant_id):
         image_file = http_content['image'].get('path',None)
         if os.path.exists(image_file):
             http_content['image']['checksum'] = md5(image_file)
+        elif is_url(image_file):
+            pass
         else:
             if not host_test_mode:
                 content = "Image file not found"
