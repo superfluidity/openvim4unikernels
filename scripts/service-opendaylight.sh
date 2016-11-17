@@ -32,7 +32,7 @@ DIR_OM=$(dirname $DIRNAME )
 function usage(){
     echo -e "Usage: $0 start|stop|restart|status"
     echo -e "  Launch|Removes|Restart|Getstatus opendaylight on a screen"
-    echo -e "  Shell variable OPENDAYDLIGHT_PATH must indicate opendaylight installation path"
+    echo -e "  Shell variable OPENDAYLIGHT_PATH must indicate opendaylight installation path"
 }
 
 function kill_pid(){
@@ -96,7 +96,7 @@ done
     #start
     if [ "$om_action" == "start" -o "$om_action" == "restart" ]
     then
-        [[ -z $OPENDAYDLIGHT_PATH ]] && echo "OPENDAYDLIGHT_PATH shell variable must indicate opendaylight installation path" >&2 && exit -1
+        [[ -z $OPENDAYLIGHT_PATH ]] && echo "OPENDAYLIGHT_PATH shell variable must indicate opendaylight installation path" >&2 && exit -1
         #calculates log file name
         logfile=""
         mkdir -p $DIR_OM/logs && logfile=$DIR_OM/logs/openflow.log && logfile_console=$DIR_OM/logs/openflow_console.log || echo "can not create logs directory  $DIR_OM/logs"
@@ -106,14 +106,14 @@ done
         echo -n "    starting $om_name ... "
         if ! screen -wipe | grep -Fq .flow
         then
-            pushd ${OPENDAYDLIGHT_PATH}/bin > /dev/null
+            pushd ${OPENDAYLIGHT_PATH}/bin > /dev/null
             screen -dmS flow  bash
             sleep 1
             popd > /dev/null
         else
             echo -n " using existing screen 'flow' ... "
             screen -S flow -p 0 -X log off
-            screen -S flow -p 0 -X stuff "cd ${OPENDAYDLIGHT_PATH}/bin\n"
+            screen -S flow -p 0 -X stuff "cd ${OPENDAYLIGHT_PATH}/bin\n"
             sleep 1
         fi
         #move old log file index one number up and log again in index 0
@@ -122,7 +122,7 @@ done
             for index in .9 .8 .7 .6 .5 .4 .3 .2 .1 ""
             do
                 rm -f ${logfile}${index}
-                ln -s ${OPENDAYDLIGHT_PATH}/data/log/karaf.log${index} ${logfile}${index}
+                ln -s ${OPENDAYLIGHT_PATH}/data/log/karaf.log${index} ${logfile}${index}
             done
             rm -rf ${logfile_console}
             screen -S flow -p 0 -X logfile ${logfile_console}
