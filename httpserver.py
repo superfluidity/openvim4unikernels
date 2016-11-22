@@ -599,7 +599,6 @@ def http_post_hosts():
                                 sriov['source_name'] = index
                                 index += 1
                             interfaces.append  ({'pci':str(port_k), 'Mbps': port_v['speed']/1000000, 'sriovs': new_sriovs, 'mac':port_v['mac'], 'source_name':port_v['source_name']})
-            #@TODO LA memoria devuelta por el RAD es incorrecta, almenos para IVY1, NFV100
             memory=node['memory']['node_size'] / (1024*1024*1024)
             #memory=get_next_2pow(node['memory']['hugepage_nr'])
             host['numas'].append( {'numa_socket': node['id'], 'hugepages': node['memory']['hugepage_nr'], 'memory':memory, 'interfaces': interfaces, 'cores': cores } )
