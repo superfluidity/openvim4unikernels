@@ -44,13 +44,14 @@ interfaced_path='/etc/network/interfaces.d/'
 #interfaced_path='/home/ubuntu/openvim_install/openvim/test-inter/'
 set_mtu_path='/etc/'
 VLAN_INDEX=20
-function _usage(){
 
+function _usage(){
     echo -e "Usage: sudo $0 [-y] <user-name>  <iface-name>"
-    echo -e "  Configure compute host for VIM usage. (version 0.4). Params:"
-    echo -e "     -y  do not prompt for confirmation. If a new user is created, the user name is set as password"
-    echo -e "     <user-name> Create if not exist and configure this user for openvim to connect"
-    echo -e "     <iface-name> if suplied creates bridge interfaces on this interface, needed for openvim"
+    echo -e "  Configure compute host for VIM usage. (version 0.4). OPTIONS:"
+    echo -e "     -h --help    this help"
+    echo -e "     -f --force:  do not prompt for confirmation. If a new user is created, the user name is set as password"
+    echo -e "     -u --user:   Create if not exist and configure this user for openvim to connect"
+    echo -e "     --in --iface-name:  creates bridge interfaces on this interface, needed for openvim overlay networks"
 }
 
 function _interface_cfg_generator(){
@@ -90,27 +91,27 @@ function _install_user() {
     groupadd -f libvirt   #for other operating systems may be libvirtd
 
     # Adds user, default password same as name
-    if grep -q "^${user_name}:" /etc/passwd
+    if grep -q "^${option_user}:" /etc/passwd
     then
         #user exist, add to group
-        echo "adding user ${user_name} to groups libvirt,admin"
-        usermod -a -G libvirt,admin -g admin ${user_name}
+        echo "adding user ${option_user} to groups libvirt,admin"
+        usermod -a -G libvirt,admin -g admin ${option_user}
     else
         #create user if it does not exist
-        [ -z "$FORCE" ] && read -p "user '${user_name}' does not exist, create (Y/n)" kk
+        [ -z "$FORCE" ] && read -p "user '${option_user}' does not exist, create (Y/n)" kk
         if ! [ -z "$kk" -o "$kk"="y" -o "$kk"="Y" ]
         then
             exit
         fi
-        echo "creating and configuring user ${user_name}"
-        useradd -m -G libvirt,admin -g admin ${user_name}
+        echo "creating and configuring user ${option_user}"
+        useradd -m -G libvirt,admin -g admin ${option_user}
         #Password
         if [ -z "$FORCE" ]
             then
-                echo "Provide a password for ${user_name}"
-                passwd ${user_name}
+                echo "Provide a password for ${option_user}"
+                passwd ${option_user}
             else
-                echo -e "$user_name\n$user_name" | passwd --stdin ${user_name}
+                echo -e "$option_user\n$option_user" | passwd --stdin ${option_user}
         fi
     fi
 
@@ -122,13 +123,13 @@ function _openmano_img_2_libvirt_img(){
     # should have only a / partition with all possible space available
 
     echo " link /opt/VNF/images to /var/lib/libvirt/images"
-    if [ "$user_name" != "" ]
+    if [ "$option_user" != "" ]
     then
         # The orchestator needs to link the images folder
         rm -f /opt/VNF/images
         mkdir -p /opt/VNF/
         ln -s /var/lib/libvirt/images /opt/VNF/images
-        chown -R ${user_name}:admin /opt/VNF
+        chown -R ${option_user}:admin /opt/VNF
         chown -R root:admin /var/lib/libvirt/images
         chmod g+rwx /var/lib/libvirt/images
     else
@@ -194,7 +195,6 @@ function _check_interface(){
     if [ -n "$1" ] && ! ifconfig $1 &> /dev/null
     then
         echo "Error: interface '$1' is not present in the system"\n
-        _usage
         exit 1
     fi
 }
@@ -204,7 +204,7 @@ function _user_remainder_pront()
     echo
     echo "Do not forget to create a shared (NFS, Samba, ...) where original virtual machine images are allocated"
     echo
-    echo "Do not forget to copy the public ssh key into /home/${user_name}/.ssh/authorized_keys for authomatic login from openvim controller"
+    echo "Do not forget to copy the public ssh key into /home/${option_user}/.ssh/authorized_keys for authomatic login from openvim controller"
     echo
     echo "Reboot the system to make the changes effective"
 }
@@ -237,8 +237,6 @@ function _hostinfo_config()
 
 function _get_opts()
 {
-    [[ ${BASH_SOURCE[0]} != $0 ]] && ___exit="return" || ___exit="exit"
-
     options="$1"
     shift
 
@@ -259,7 +257,7 @@ function _get_opts()
         shift
         if [[ -n $get_argument ]]
         then
-            [[ ${argument:0:1} == "-" ]] && echo "option '-$option' requires an argument"  >&2 && $___exit 1
+            [[ ${argument:0:1} == "-" ]] && echo "option '-$option' requires an argument"  >&2 && return 1
             eval ${get_argument}='"$argument"'
             #echo option $get_argument with argument
             get_argument=""
@@ -303,7 +301,7 @@ function _get_opts()
                         fi
                     done
                 done
-                [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && $___exit 1
+                [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && return 1
             done
         elif [[ ${argument:0:2} == "--" ]] && [[ ${#argument} -ge 3 ]]
         then
@@ -324,7 +322,7 @@ function _get_opts()
                         bad_option=n
                         if [[ ${option_group:${#option_group}-1} != "=" ]]
                         then #not an argument
-                            [[ -n "${option_argument}" ]] && echo "option '--${option%%=*}' do not accept an argument " >&2 && $___exit 1
+                            [[ -n "${option_argument}" ]] && echo "option '--${option%%=*}' do not accept an argument " >&2 && return 1
                             eval option_${_name}='"${option_'${_name}'}-"'
                         elif [[ -n "${option_argument}" ]]
                         then
@@ -337,7 +335,7 @@ function _get_opts()
                     fi
                 done
             done
-            [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && $___exit 1
+            [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && return 1
         elif [[ ${argument:0:2} == "--" ]]
         then
             option__="$*"
@@ -351,49 +349,41 @@ function _get_opts()
                     break
                 fi
             done
-            [[ $bad_option == y ]] && echo "invalid argument '--'?  Type -h for help" >&2 && $___exit 1
+            [[ $bad_option == y ]] && echo "invalid argument '--'?  Type -h for help" >&2 && return 1
             break
         else
             params="$params ${argument}"
         fi
 
     done
+    echo option_help "$option_help"
 
-    [[ -n "$get_argument" ]] && echo "option '-$option' requires an argument"  >&2 && $___exit 1
-    $___exit 0
-
+    [[ -n "$get_argument" ]] && echo "option '-$option' requires an argument"  >&2 && return  1
+    return 0
 }
 
 function _parse_opts()
 {
+    [ -n "$option_help" ] && _usage && exit 0
+
     FORCE=""
-    if [ -n "$option_help" ];
-    then
-        _usage
-        exit -1
-    fi
+    [ -n "$option_force" ] && FORCE="yes"
 
-    if [ -n "$option_force" ];
-        then
-            FORCE="yes"
-            echo "force = yes"
-        fi
+    [ -z "$option_user" ] && echo -e "ERROR: User argument is mandatory, --user=<user>\n" >&2 && _usage
+    #echo "user_name = "$option_user
 
-    [ -z "$option_user" ] && echo -e "ERROR: User argument is mandatory, --user=<user>\n" && usage
-    USER=${option_user}
-     echo "user_name = "$option_user
-
-    [ -z "$option_iface_name" ] && echo -e "ERROR: User argument is mandatory, --user=<user>\n" && usage
+    [ -z "$option_iface_name" ] && echo -e "ERROR: iface-name argument is mandatory, --iface-name=<interface>\n" && _usage
     interface=$option_iface_name
 
 }
 #1 CHECK input parameters
-#1.1 root privileges
-[ "${USER}" != "root" ] && echo "Needed root privileges" && _usage && exit -1
-
 
 #Parse opts
-_get_opts "help:h force:f user:u= iface-name:in= "  $*
+_get_opts "help:h force:f user:u= iface-name:in= "  $*  || exit 1
+
+#check root privileges
+[ "${USER}" != "root" ] && echo "Needed root privileges" >&2 && exit 2
+
 _parse_opts
 
 echo "checking interface "$interface
