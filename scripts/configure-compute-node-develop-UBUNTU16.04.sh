@@ -52,6 +52,7 @@ function _usage(){
     echo -e "     -f --force:  do not prompt for confirmation. If a new user is created, the user name is set as password"
     echo -e "     -u --user:   Create if not exist and configure this user for openvim to connect"
     echo -e "     --in --iface-name:  creates bridge interfaces on this interface, needed for openvim overlay networks"
+    exit 1
 }
 
 function _interface_cfg_generator(){
@@ -356,7 +357,6 @@ function _get_opts()
         fi
 
     done
-    echo option_help "$option_help"
 
     [[ -n "$get_argument" ]] && echo "option '-$option' requires an argument"  >&2 && return  1
     return 0
@@ -376,15 +376,13 @@ function _parse_opts()
     interface=$option_iface_name
 
 }
-#1 CHECK input parameters
 
 #Parse opts
 _get_opts "help:h force:f user:u= iface-name:in= "  $*  || exit 1
+_parse_opts
 
 #check root privileges
 [ "${USER}" != "root" ] && echo "Needed root privileges" >&2 && exit 2
-
-_parse_opts
 
 echo "checking interface "$interface
 

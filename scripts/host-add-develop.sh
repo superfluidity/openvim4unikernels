@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 ##
@@ -26,17 +25,18 @@
 
 function usage(){
 
-    echo -e "\nUsage: $0 --user <user> --ip=<X.X.X.X> --cores=<core_number> --huge-pages-1G=<huga_pages_number> --nb-10GB-interfaces==<interface_number>"
+    echo -e "\nUsage: $0 --user-name <user> --ip=<X.X.X.X> --cores=<core_number> --huge-pages-1G=<huga_pages_number> --nb-10GB-interfaces==<interface_number>"
     echo -e "Generate a develop host yaml to be used for openvim host-add\n"
-    echo -e "   --user  -u  <user>        Server OAM Ip"
-    echo -e "   --ip    -i  <ip>          Server hostname"
-    echo -e "   --cores -c  <cores>       Numa Cores available must be an odd number and bigger or equal to 4."
+    echo -e "   --user-name -u  <user>*       Server OAM Ip"
+    echo -e "   --ip        -i  <ip>*         Server hostname"
+    echo -e "   --cores     -c  <cores>       Numa Cores available must be an odd number and bigger or equal to 4."
     echo -e "   --huge-pages-1G      -hp  <huge_pages_number>   Must be an odd number and bigger or equal to 16. 4GiB of memory will be reserved for the host OS, the rest will be used by VM."
     echo -e "   --nb-10GB-interfaces -ni  <nb-10GB-interfaces>  Dataplane interfaces must be an odd number and bigger or equal to 4."
+    echo -e "   * Mandatory arguments"
     echo -e "\n"
     echo -e "The output will be a server descriptor with two numas and resources (memory, cores and interfaces) equally distributed between them."
     echo -e "Each interface (physical funtion) will have defined 8 SR-IOV (virtual functions)."
-    echo -e "\n"
+
     exit 1
 }
 
@@ -62,8 +62,8 @@ function _parse_opts(){
     fi
 
     #User argument
-    [ -z "$option_user" ] && echo -e "ERROR: User argument is mandatory, --user=<user>\n" && usage
-    USER=${option_user}
+    [ -z "$option_user_name" ] && echo -e "ERROR: User argument is mandatory, --user-name=<user>\n" && usage
+    USER_NAME=${option_user_name}
 
     [ -z "$option_ip" ] && echo -e "ERROR: OAM IP argument is mandatory, --ip=<X.X.X.X>\n" && usage
     IP=${option_ip}
@@ -118,11 +118,11 @@ function _generate_compute_develope_yaml(){
     echo2file
     echo2file "host:"
     echo2file "  name:    $HOST_NAME"
-    echo2file "  user:    $USER"
+    echo2file "  user:    $USER_NAME"
     echo2file "  ip_name: $IP"
     echo2file "host-data:"
     echo2file "  name:        $HOST_NAME"
-    echo2file "  user:        $USER"
+    echo2file "  user:        $USER_NAME"
     echo2file "  ip_name:     $IP"
     echo2file "  ranking:     100"
     echo2file "  description: $HOST_NAME"
@@ -206,8 +206,6 @@ function echo2file(){
 
 function _get_opts()
 {
-    [[ ${BASH_SOURCE[0]} != $0 ]] && ___exit="return" || ___exit="exit"
-
     options="$1"
     shift
 
@@ -228,7 +226,7 @@ function _get_opts()
         shift
         if [[ -n $get_argument ]]
         then
-            [[ ${argument:0:1} == "-" ]] && echo "option '-$option' requires an argument"  >&2 && $___exit 1
+            [[ ${argument:0:1} == "-" ]] && echo "option '-$option' requires an argument"  >&2 && return 1
             eval ${get_argument}='"$argument"'
             #echo option $get_argument with argument
             get_argument=""
@@ -272,7 +270,7 @@ function _get_opts()
                         fi
                     done
                 done
-                [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && $___exit 1
+                [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && return 1
             done
         elif [[ ${argument:0:2} == "--" ]] && [[ ${#argument} -ge 3 ]]
         then
@@ -293,7 +291,7 @@ function _get_opts()
                         bad_option=n
                         if [[ ${option_group:${#option_group}-1} != "=" ]]
                         then #not an argument
-                            [[ -n "${option_argument}" ]] && echo "option '--${option%%=*}' do not accept an argument " >&2 && $___exit 1
+                            [[ -n "${option_argument}" ]] && echo "option '--${option%%=*}' do not accept an argument " >&2 && return 1
                             eval option_${_name}='"${option_'${_name}'}-"'
                         elif [[ -n "${option_argument}" ]]
                         then
@@ -306,7 +304,7 @@ function _get_opts()
                     fi
                 done
             done
-            [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && $___exit 1
+            [[ $bad_option == y ]] && echo "invalid argument '-$option'?  Type -h for help" >&2 && return 1
         elif [[ ${argument:0:2} == "--" ]]
         then
             option__="$*"
@@ -320,7 +318,7 @@ function _get_opts()
                     break
                 fi
             done
-            [[ $bad_option == y ]] && echo "invalid argument '--'?  Type -h for help" >&2 && $___exit 1
+            [[ $bad_option == y ]] && echo "invalid argument '--'?  Type -h for help" >&2 && return 1
             break
         else
             params="$params ${argument}"
@@ -328,21 +326,22 @@ function _get_opts()
 
     done
 
-    [[ -n "$get_argument" ]] && echo "option '-$option' requires an argument"  >&2 && $___exit 1
-    $___exit 0
-
+    [[ -n "$get_argument" ]] && echo "option '-$option' requires an argument"  >&2 && return  1
+    return 0
 }
-
-#check root privileges and non a root user behind
-[ "${USER}" != "root" ] && echo "Needed root privileges" && _usage && exit -1
 
 #process options
 DIRNAME=$(readlink -f ${BASH_SOURCE[0]})
 DIRNAME=$(dirname $DIRNAME)
 
 #source ${DIRNAME}/get-options.sh "help:h user:u= ip:i= cores:c= huge-pages-1G:hp= nb-10GB-interfaces:ni="  $*
-_get_opts "help:h user:u= ip:i= cores:c= huge-pages-1G:hp= nb-10GB-interfaces:ni="  $*
+_get_opts "help:h user-name:u= ip:i= cores:c= huge-pages-1G:hp= nb-10GB-interfaces:ni="  $* || exit 1
 _parse_opts
+
+#check root privileges
+[ "${USER}" != "root" ] && echo "Needed root privileges" >&2 && exit 2
+#check root privileges and non a root user behind
+
 
 HOST_NAME=`cat /etc/hostname`
 
