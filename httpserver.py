@@ -30,6 +30,7 @@ __author__="Alfonso Tierno"
 __date__ ="$10-jul-2014 12:07:15$"
 
 import bottle
+import urlparse
 import yaml
 import json
 import threading
@@ -451,6 +452,18 @@ def check_valid_uuid(uuid):
     except js_e.ValidationError:
         return False
 
+
+def is_url(url):
+    '''
+    Check if string value is a well-wormed url
+    :param url: string url
+    :return: True if is a valid url, False if is not well-formed
+    '''
+
+    parsed_url = urlparse.urlparse(url)
+    return parsed_url
+
+
 @bottle.error(400)
 @bottle.error(401) 
 @bottle.error(404) 
@@ -586,7 +599,6 @@ def http_post_hosts():
                                 sriov['source_name'] = index
                                 index += 1
                             interfaces.append  ({'pci':str(port_k), 'Mbps': port_v['speed']/1000000, 'sriovs': new_sriovs, 'mac':port_v['mac'], 'source_name':port_v['source_name']})
-            #@TODO LA memoria devuelta por el RAD es incorrecta, almenos para IVY1, NFV100
             memory=node['memory']['node_size'] / (1024*1024*1024)
             #memory=get_next_2pow(node['memory']['hugepage_nr'])
             host['numas'].append( {'numa_socket': node['id'], 'hugepages': node['memory']['hugepage_nr'], 'memory':memory, 'interfaces': interfaces, 'cores': cores } )
@@ -1091,6 +1103,8 @@ def http_post_images(tenant_id):
         image_file = http_content['image'].get('path',None)
         if os.path.exists(image_file):
             http_content['image']['checksum'] = md5(image_file)
+        elif is_url(image_file):
+            pass
         else:
             if not host_test_mode:
                 content = "Image file not found"

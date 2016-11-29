@@ -273,7 +273,7 @@ host_data_schema={
                 "type": "object",
                 "properties":{
                     "admin_state_up":{"type":"boolean"},
-                    "hugepages":integer1_schema,
+                    "hugepages":integer0_schema,
                     "cores":{
                         "type": "array",
                         "minItems":2,
@@ -324,7 +324,7 @@ host_data_schema={
                     "memory":integer1_schema
                 },
                 "additionalProperties": False,
-                "required": ["hugepages","cores","numa_socket"]
+                "required": ["cores","numa_socket"]
             }
         }
     },

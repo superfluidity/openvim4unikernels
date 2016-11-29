@@ -205,7 +205,7 @@ fi  #[[ -z "$NO_PACKAGES" ]]
 if [[ -n $QUIET_MODE ]]
 then
     echo -e "\nCheking database connection and ask for credentials"
-    while ! mysqladmin -s -u$DBUSER $DBPASSWD_PARAM ping
+    while ! mysqladmin -s -u$DBUSER $DBPASSWD_PARAM status >/dev/null
     do
         [ -n "$logintry" ] &&  echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
         [ -z "$logintry" ] &&  echo -e "\nProvide database credentials"
@@ -237,7 +237,7 @@ echo '
 #####                 DOWNLOAD SOURCE                       #####
 #################################################################'
 su $SUDO_USER -c 'git clone '"${GIT_URL}"' openvim'
-[[ -z $DEVELOP ]] && su $SUDO_USER -c 'cd openvim; git checkout tags/v1.0; cd ..'
+[[ -z $DEVELOP ]] && su $SUDO_USER -c 'git -C openvim checkout tags/v1.0.1'
 
 #Unncoment to use a concrete branch, if not main branch 
 #pushd openvim
