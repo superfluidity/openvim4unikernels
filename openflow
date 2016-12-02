@@ -205,6 +205,8 @@ def of_add(args):
     if r<0:
         print c
         return -1
+    if args.print_id:
+        print rule["name"]
     return 0
 
 def of_delete(args):
@@ -280,6 +282,7 @@ if __name__=="__main__":
     add_parser.add_argument("--setvlan", action="append", dest="act", type=int, help="alternative to --actions. Use before --out to set vlan")
     add_parser.add_argument("--out", action="append", dest="act", type=str, help="alternative to --actions. out=<egress-port> can be used several times")
     add_parser.add_argument('--debug', '-d', action='store_true', help="show debug information")
+    add_parser.add_argument('--print-id', action='store_true', help="print the flow id after added")
     add_parser.set_defaults(func=of_add)
     
     delete_parser = subparsers.add_parser('delete', help="delete an openflow rule")

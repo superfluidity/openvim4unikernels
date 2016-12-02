@@ -146,7 +146,7 @@ TODELETE="restore"
 
 printf "%-50s" "new rule vlan,mac -> no vlan: "
 rule_name=fromVlanMac_to_NoVlan1
-openflow add $rule_name --priority 1000 --matchmac "aa:bb:cc:dd:ee:ff" --matchvlan 500 --inport $port0 --stripvlan --out $port1 $debug 
+rule_name=`openflow add $rule_name --priority 1000 --matchmac "aa:bb:cc:dd:ee:ff" --matchvlan 500 --inport $port0 --stripvlan --out $port1 $debug --print-id`
 [[ $? != 0 ]] && echo  "FAIL cannot insert new rule" && $_exit 1
 expected="$OF_CONTROLLER_DPID 1000 $rule_name $port0 aa:bb:cc:dd:ee:ff 500 vlan=None,out=$port1"
 result=`openflow list | grep $rule_name`
@@ -158,7 +158,7 @@ TODELETE="$rule_name $TODELETE"
 
 printf "%-50s" "new rule mac -> vlan: "
 rule_name=fromMac_to_Vlan2
-openflow add $rule_name --priority 1001 --matchmac "ff:ff:ff:ff:ff:ff" --inport $port1 --setvlan 501 --out $port2 --out $port3 $debug 
+rule_name=`openflow add $rule_name --priority 1001 --matchmac "ff:ff:ff:ff:ff:ff" --inport $port1 --setvlan 501 --out $port2 --out $port3 $debug  --print-id`
 [[ $? != 0 ]] && echo  "FAIL cannot insert new rule" && $_exit 1
 expected="$OF_CONTROLLER_DPID 1001 $rule_name $port1 ff:ff:ff:ff:ff:ff any vlan=501,out=$port2,out=$port3"
 result=`openflow list | grep $rule_name`
@@ -170,7 +170,7 @@ TODELETE="$rule_name $TODELETE"
 
 printf "%-50s" "new rule None -> None: "
 rule_name=fromNone_to_None
-openflow add $rule_name --priority 1002 --inport $port2 --out $port0 $debug 
+rule_name=`openflow add $rule_name --priority 1002 --inport $port2 --out $port0 $debug  --print-id`
 [[ $? != 0 ]] && echo  "FAIL cannot insert new rule" && $_exit 1
 expected="$OF_CONTROLLER_DPID 1002 $rule_name $port2 any any out=$port0"
 result=`openflow list | grep $rule_name`
@@ -182,7 +182,7 @@ TODELETE="$rule_name $TODELETE"
 
 printf "%-50s" "new rule vlan -> vlan: "
 rule_name=fromVlan_to_Vlan1
-openflow add $rule_name --priority 1003 --matchvlan 504 --inport $port3 --setvlan 505 --out $port0 $debug 
+rule_name=`openflow add $rule_name --priority 1003 --matchvlan 504 --inport $port3 --setvlan 505 --out $port0 $debug  --print-id`
 [[ $? != 0 ]] && echo  "FAIL cannot insert new rule" && $_exit 1
 expected="$OF_CONTROLLER_DPID 1003 $rule_name $port3 any 504 vlan=505,out=$port0"
 result=`openflow list | grep $rule_name`
@@ -198,7 +198,7 @@ then
 
   printf "%-50s" "new rule Vlan -> Vlan_Vlan: "
   rule_name=fromVlan_to_Vlan1Vlan1
-  openflow add $rule_name --priority 1005 --inport $port3 --matchvlan 505 --setvlan 510 --out $port0 --setvlan 511 --out $port1 --stripvlan --out=$port2 $debug 
+  rule_name=`openflow add $rule_name --priority 1005 --inport $port3 --matchvlan 505 --setvlan 510 --out $port0 --setvlan 511 --out $port1 --stripvlan --out=$port2 $debug --print-id`
   [[ $? != 0 ]] && echo  "FAIL cannot insert new rule" && $_exit 1
   expected="$OF_CONTROLLER_DPID 1005 $rule_name $port3 any 505 vlan=510,out=$port0,vlan=511,out=$port1,vlan=None,out=$port2"
   result=`openflow list | grep $rule_name`
