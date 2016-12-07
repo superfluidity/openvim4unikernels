@@ -37,7 +37,8 @@ import threading
 import datetime
 import hashlib
 import os
-import RADclass
+import imp
+#import only if needed because not needed in test mode. To allow an easier installation   import RADclass
 from jsonschema import validate as js_v, exceptions as js_e
 import host_thread as ht
 from vim_schema import host_new_schema, host_edit_schema, tenant_new_schema, \
@@ -50,6 +51,8 @@ from vim_schema import host_new_schema, host_edit_schema, tenant_new_schema, \
 global my
 global url_base
 global config_dic
+global RADclass_module
+RADclass=None  #RADclass module is charged only if not in test mode
 
 url_base="/openvim"
 
@@ -535,9 +538,14 @@ def http_post_hosts():
         ip_name=host['ip_name']
         user=host['user']
         password=host.get('password', None)
+        if not RADclass_module:
+            try:
+                RADclass_module = imp.find_module("RADclass")
+            except (IOError, ImportError) as e:
+                raise ImportError("Cannot import RADclass.py Openvim not properly installed" +str(e))
 
         #fill rad info
-        rad = RADclass.RADclass()
+        rad = RADclass_module.RADclass()
         (return_status, code) = rad.obtain_RAD(user, password, ip_name)
         
         #return 
