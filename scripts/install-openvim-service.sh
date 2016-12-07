@@ -38,7 +38,7 @@ function usage(){
 function uninstall(){
     echo "systemctl disable openvim.service " &&  systemctl disable openvim.service 2>/dev/null || echo "  Already done"
     echo "service openvim stop " && service openvim stop 2>/dev/null || echo "  Already done"
-    for file in /opt/openvim /etc/default/openvimd.cfg /var/log/openvim /etc/systemd/system/openvim.service /usr/bin/openvim /usr/bin/initopenvim /usr/sbin/service-openvim /usr/bin/openvim-report
+    for file in /opt/openvim /etc/default/openvimd.cfg /var/log/openvim /etc/systemd/system/openvim.service /usr/bin/openvim /usr/bin/initopenvim /usr/sbin/service-openvim /usr/bin/openvim-report /usr/bin/openflow
     do
         rm -rf $file || ! echo "Can not delete '$file'. Needed root privileges?" >&2 || exit 1
     done
@@ -137,6 +137,7 @@ ln -s -v /opt/openvim/openvim /usr/bin/openvim
 ln -s -v /opt/openvim/scripts/service-openvim.sh /usr/sbin/service-openvim
 ln -s -v /opt/openvim/scripts/openvim-report.sh /usr/bin/openvim-report
 ln -s -v /opt/openvim/scripts/initopenvim.sh /usr/bin/initopenvim
+ln -s -v /opt/openvim/openflow /usr/bin/openflow
 
 chown -R $SUDO_USER /opt/openvim
 
