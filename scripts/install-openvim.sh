@@ -25,6 +25,8 @@
 #Get needed packages, source code and configure to run openvim
 #Ask for database user and password if not provided
 
+
+
 function usage(){
     echo -e "usage: sudo $0 [OPTIONS]"
     echo -e "Install last stable source code in ./openvim and the needed packages"
@@ -35,7 +37,10 @@ function usage(){
     echo -e "     -q --quiet: install in an unattended mode"
     echo -e "     -h --help:  show this help"
     echo -e "     --develop:  install last version for developers, and do not configure as a service"
-    echo -e "     --skip-install-packages: use this option to skip and update and install the requires packages. This avoid wasting time if you are sure requires packages are present for e.g. a previous installation"
+    echo -e "     --forcedb:  reinstall vim_db DB, deleting previous database if exists and creating a new one"
+    echo -e "     --force:    makes idenpotent, delete previous installations folders if needed"
+    echo -e "     --noclone:  assumes that openvim was cloned previously and that this script is run from the local repo"
+    echo -e "     --no-install-packages: use this option to skip updating and installing the requires packages. This avoid wasting time if you are sure requires packages are present e.g. because of a previous installation"
 }
 
 function install_packages(){
@@ -56,6 +61,16 @@ function install_packages(){
     done
 }
 
+function db_exists() {
+    RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -o $1`
+    if [ "$RESULT" == "$1" ]; then
+        echo " DB $1 exists"
+        return 0
+    fi
+    echo " DB $1 does not exist"
+    return 1
+}
+
 
 GIT_URL=https://osm.etsi.org/gerrit/osm/openvim.git
 DBUSER="root"
@@ -63,6 +78,9 @@ DBPASSWD=""
 DBPASSWD_PARAM=""
 QUIET_MODE=""
 DEVELOP=""
+FORCEDB=""
+FORCE=""
+NOCLONE=""
 NO_PACKAGES=""
 while getopts ":u:p:hiq-:" o; do
     case "${o}" in
@@ -83,8 +101,11 @@ while getopts ":u:p:hiq-:" o; do
         -)
             [ "${OPTARG}" == "help" ] && usage && exit 0
             [ "${OPTARG}" == "develop" ] && DEVELOP="y" && continue
+            [ "${OPTARG}" == "forcedb" ] && FORCEDB="y" && continue
+            [ "${OPTARG}" == "force" ]   && FORCEDB="y" && FORCE="y" && continue
+            [ "${OPTARG}" == "noclone" ] && NOCLONE="y" && continue
             [ "${OPTARG}" == "quiet" ] && export QUIET_MODE=yes && export DEBIAN_FRONTEND=noninteractive && continue
-            [ "${OPTARG}" == "skip-install-packages" ] && export NO_PACKAGES=yes && continue
+            [ "${OPTARG}" == "no-install-packages" ] && export NO_PACKAGES=yes && continue
             echo -e "Invalid option: '--$OPTARG'\nTry $0 --help for more information" >&2
             exit 1
             ;;
@@ -148,6 +169,23 @@ else  #[ "$_DISTRO" != "Ubuntu" -a "$_DISTRO" != "CentOS" -a "$_DISTRO" != "Red"
     [ -x /usr/bin/yum ]     && _DISTRO="CentOS" && _RELEASE="7"
     read -e -p "WARNING! Not tested Linux distribution '$_DISTRO_DISCOVER '. Continue assuming a '$_DISTRO $_RELEASE' type? (y/N)" KK
     [ "$KK" != "y" -a  "$KK" != "yes" ] && echo "Cancelled" && exit 0
+fi
+
+#check if installed as a service
+INSTALL_AS_A_SERVICE=""
+[[ "$_DISTRO" == "Ubuntu" ]] &&  [[ ${_RELEASE%%.*} == 16 ]] && [[ -z $DEVELOP ]] && INSTALL_AS_A_SERVICE="y"
+
+#Next operations require knowing BASEFOLDER
+if [[ -z "$NOCLONE" ]]; then
+    if [[ -n "$INSTALL_AS_A_SERVICE" ]] ; then
+        OPENVIM_BASEFOLDER=__openvim__${RANDOM}
+    else
+        OPENVIM_BASEFOLDER="${PWD}/openvim"
+    fi
+    [[ -n "$FORCE" ]] && rm -rf $OPENVIM_BASEFOLDER #make idempotent
+else
+    HERE=$(realpath $(dirname $0))
+    OPENVIM_BASEFOLDER=$(dirname $HERE)
 fi
 
 
@@ -232,30 +270,75 @@ echo '
 
 fi  #[[ -z "$NO_PACKAGES" ]]
 
-echo '
+if [[ -z $NOCLONE ]]; then
+    echo '
 #################################################################
 #####                 DOWNLOAD SOURCE                       #####
 #################################################################'
-su $SUDO_USER -c 'git clone '"${GIT_URL}"' openvim'
-[[ -z $DEVELOP ]] && su $SUDO_USER -c 'git -C openvim checkout tags/v1.0.1'
+    if [[ -d "${OPENVIM_BASEFOLDER}" ]]
+    then
+        if [[ -n "$FORCE" ]]
+        then
+            echo "deleting '${OPENVIM_BASEFOLDER}' folder"
+            rm -rf "$OPENVIM_BASEFOLDER" #make idempotent
+        elif [[ -z "$QUIET_MODE" ]]
+        then
+            read -e -p "${OPENVIM_BASEFOLDER} folder exist, overwrite? (y/N)" KK
+            if [[ "$KK" == "y" ]] || [[ "$KK" == "yes" ]]
+                then rm -rf "$OPENVIM_BASEFOLDER"
+            else
+                echo "canceled"
+                exit 1
+            fi
+        else
+            echo "'${OPENVIM_BASEFOLDER}' folder exist" >&2 && exit 1
+        fi
+    fi
 
-#Unncoment to use a concrete branch, if not main branch 
-#pushd openvim
-#su $SUDO_USER -c 'git checkout v0.4'
-#popd
+
+    su $SUDO_USER -c "git clone ${GIT_URL} ${OPENVIM_BASEFOLDER}"
+    su $SUDO_USER -c "cp ${OPENVIM_BASEFOLDER}/.gitignore-common ${OPENVIM_BASEFOLDER}/.gitignore"
+    [[ -z $DEVELOP ]] && su $SUDO_USER -c "git -C  ${OPENVIM_BASEFOLDER} checkout tags/v1.0.1"
+fi
 
 echo '
 #################################################################
 #####               CREATE DATABASE                         #####
 #################################################################'
-mysqladmin -u$DBUSER $DBPASSWD_PARAM -s create vim_db || ! echo "Cannot create database vim_db" || exit 1
+echo -e "\nCreating temporary file form MYSQL installation and initialization"
+TEMPFILE="$(mktemp -q --tmpdir "installopenvim.XXXXXX")"
+trap 'rm -f "$TEMPFILE"' EXIT
+chmod 0600 "$TEMPFILE"
+echo -e "[client]\n user='$DBUSER'\n password='$DBPASSWD'">"$TEMPFILE"
 
-echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"     | mysql -u$DBUSER $DBPASSWD_PARAM || ! echo "Failed while creating user vim at dabase" || exit 1
-echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';"   | mysql -u$DBUSER $DBPASSWD_PARAM || ! echo "Failed while creating user vim at dabase" || exit 1
-echo " Database 'vim_db' created, user 'vim' password 'vimpw'"
+if db_exists "vim_db" $TEMPFILE ; then
+    if [[ -n $FORCEDB ]]; then
+        echo "   Deleting previous database vim_db"
+        DBDELETEPARAM=""
+        [[ -n $QUIET_MODE ]] && DBDELETEPARAM="-f"
+        mysqladmin --defaults-extra-file=$TEMPFILE -s drop vim_db $DBDELETEPARAM || ! echo "Could not delete vim_db database" || exit 1
+        #echo "REVOKE ALL PRIVILEGES ON vim_db.* FROM 'vim'@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+        #echo "DELETE USER 'vim'@'localhost';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+        mysqladmin --defaults-extra-file=$TEMPFILE -s create vim_db || ! echo "Error creating vim_db database" || exit 1
+        echo "DROP USER 'vim'@'localhost';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+        echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+        echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+        echo " Database 'vim_db' created, user 'vim' password 'vimpw'"
+    else
+        echo "Database exists. Use option '--forcedb' to force the deletion of the existing one" && exit 1
+    fi
+else
+    mysqladmin -u$DBUSER $DBPASSWD_PARAM -s create vim_db || ! echo "Error creating vim_db database" || exit 1
+    echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+    echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
+    echo " Database 'vim_db' created, user 'vim' password 'vimpw'"
+fi
 
-
-su $SUDO_USER -c './openvim/database_utils/init_vim_db.sh -u vim -p vimpw'  || ! echo "Failed while creating user vim at dabase" || exit 1
+echo '
+#################################################################
+#####        INIT DATABASE                                  #####
+#################################################################'
+su $SUDO_USER -c "${OPENVIM_BASEFOLDER}/database_utils/init_vim_db.sh -u vim -p vimpw -d vim_db" || ! echo "Failed while initializing database" || exit 1
 
 
 if [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ]
@@ -292,39 +375,41 @@ echo '
 #################################################################
 #####        CONFIGURE openvim CLIENT                       #####
 #################################################################'
-#creates a link at ~/bin
-su $SUDO_USER -c 'mkdir -p ~/bin'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/openvim'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/openflow'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/service-openvim'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/initopenvim'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/service-floodlight'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/service-opendaylight'
-su $SUDO_USER -c 'rm -f ${HOME}/bin/get_dhcp_lease.sh'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/openvim   ${HOME}/bin/openvim'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/openflow  ${HOME}/bin/openflow'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/service-openvim.sh  ${HOME}/bin/service-openvim'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/initopenvim.sh  ${HOME}/bin/initopenvim'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/service-floodlight.sh  ${HOME}/bin/service-floodlight'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/service-opendaylight.sh  ${HOME}/bin/service-opendaylight'
-su $SUDO_USER -c 'ln -s ${PWD}/openvim/scripts/get_dhcp_lease.sh  ${HOME}/bin/get_dhcp_lease.sh'
-
-#insert /home/<user>/bin in the PATH
-#skiped because normally this is done authomatically when ~/bin exist
-#if ! su $SUDO_USER -c 'echo $PATH' | grep -q "/home/${SUDO_USER}/bin"
-#then
-#    echo "    inserting /home/$SUDO_USER/bin in the PATH at .bashrc"
-#    su $SUDO_USER -c 'echo "PATH=\$PATH:/home/\${USER}/bin" >> ~/.bashrc'
-#fi
-
-if [[ $SUDO_USER == root ]]
+#creates a link at ~/bin if not configured as a service
+if [[ -z "$INSTALL_AS_A_SERVICE" ]]
 then
-    if ! echo $PATH | grep -q "${HOME}/bin"
+    su $SUDO_USER -c 'mkdir -p ~/bin'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/openvim'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/openflow'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/service-openvim'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/initopenvim'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/service-floodlight'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/service-opendaylight'
+    su $SUDO_USER -c 'rm -f ${HOME}/bin/get_dhcp_lease.sh'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/openvim'   "'${HOME}/bin/openvim'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/openflow'  "'${HOME}/bin/openflow'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-openvim.sh'  "'${HOME}/bin/service-openvim'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/initopenvim.sh'  "'${HOME}/bin/initopenvim'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-floodlight.sh'  "'${HOME}/bin/service-floodlight'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-opendaylight.sh'  "'${HOME}/bin/service-opendaylight'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/get_dhcp_lease.sh'  "'${HOME}/bin/get_dhcp_lease.sh'
+    
+    #insert /home/<user>/bin in the PATH
+    #skiped because normally this is done authomatically when ~/bin exist
+    #if ! su $SUDO_USER -c 'echo $PATH' | grep -q "/home/${SUDO_USER}/bin"
+    #then
+    #    echo "    inserting /home/$SUDO_USER/bin in the PATH at .bashrc"
+    #    su $SUDO_USER -c 'echo "PATH=\$PATH:/home/\${USER}/bin" >> ~/.bashrc'
+    #fi
+    
+    if [[ $SUDO_USER == root ]]
     then
-        echo "PATH=\$PATH:\${HOME}/bin" >> ${HOME}/.bashrc
+        if ! echo $PATH | grep -q "${HOME}/bin"
+        then
+            echo "PATH=\$PATH:\${HOME}/bin" >> ${HOME}/.bashrc
+        fi
     fi
 fi
-
 
 #configure arg-autocomplete for this user
 #in case of minmal instalation this package is not installed by default
@@ -339,19 +424,20 @@ fi
 
 
 
-if [[ "$_DISTRO" == "Ubuntu" ]] &&  [[ ${_RELEASE%%.*} == 16 ]] && [[ -z $DEVELOP ]]
+if [[ -n "$INSTALL_AS_A_SERVICE"  ]]
 then
 echo '
 #################################################################
 #####             CONFIGURE OPENVIM SERVICE                 #####
 #################################################################'
 
-    ./openvim/scripts/install-openvim-service.sh -f openvim #-u $SUDO_USER
+    ${OPENVIM_BASEFOLDER}/scripts/install-openvim-service.sh -f ${OPENVIM_BASEFOLDER} && `[[ -z "$NOCLONE" ]] && echo "-d"`
 #    alias service-openvim="service openvim"
 #    echo 'alias service-openvim="service openvim"' >> ${HOME}/.bashrc
 
     echo
-    echo "Done!  you may need to logout and login again for loading client configuration"
+    echo
+    echo "Done!  installed at /opt/openvim"
     echo " Manage server with 'service openvim start|stop|status|...' "
 
 
@@ -359,6 +445,6 @@ else
 
     echo
     echo "Done!  you may need to logout and login again for loading client configuration"
-    echo " Run './openvim/scripts/service-openvim.sh start' for starting openvim in a screen"
+    echo " Run 'service-openvim start' for starting openvim in a screen"
 
 fi
