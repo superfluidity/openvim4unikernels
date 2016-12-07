@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ##
-# Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
+# Copyright 2015 Telefï¿½nica Investigaciï¿½n y Desarrollo, S.A.U.
 # This file is part of openvim
 # All Rights Reserved.
 #
@@ -134,7 +134,7 @@ function xmlpath_args()
 [[ "$#" -lt "2" ]] && echo "Missing parameters" && usage
 load_vf_driver ixgbe
 load_vf_driver i40e
-
+/etc/rc.local
 HOST_NAME=`cat /etc/hostname`
 FEATURES=`grep "^flags"  /proc/cpuinfo`
 FEATURES_LIST=""
@@ -265,7 +265,7 @@ then
     eval $underscored_pci["switch_port"]=$switch_port
   fi
 
-  #Añado el pci de cada uno de los hijos
+  #Aï¿½ado el pci de cada uno de los hijos
   SRIOV_counter=0
   for child in `xmlpath_args "device/capability/capability/address" < parent_xml`
   do 
