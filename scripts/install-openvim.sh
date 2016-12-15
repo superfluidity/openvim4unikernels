@@ -298,7 +298,7 @@ if [[ -z $NOCLONE ]]; then
 
     su $SUDO_USER -c "git clone ${GIT_URL} ${OPENVIM_BASEFOLDER}"
     su $SUDO_USER -c "cp ${OPENVIM_BASEFOLDER}/.gitignore-common ${OPENVIM_BASEFOLDER}/.gitignore"
-    [[ -z $DEVELOP ]] && su $SUDO_USER -c "git -C  ${OPENVIM_BASEFOLDER} checkout tags/v1.0.1"
+    [[ -z $DEVELOP ]] && su $SUDO_USER -c "git -C  ${OPENVIM_BASEFOLDER} checkout tags/stable"
 fi
 
 echo '
@@ -431,7 +431,8 @@ echo '
 #####             CONFIGURE OPENVIM SERVICE                 #####
 #################################################################'
 
-    ${OPENVIM_BASEFOLDER}/scripts/install-openvim-service.sh -f ${OPENVIM_BASEFOLDER} && `[[ -z "$NOCLONE" ]] && echo "-d"`
+    DELETE_PARAM="" && [[ -z "$NOCLONE" ]] && DELETE_PARAM="-d"
+    ${OPENVIM_BASEFOLDER}/scripts/install-openvim-service.sh -f ${OPENVIM_BASEFOLDER} ${DELETE_PARAM}
 #    alias service-openvim="service openvim"
 #    echo 'alias service-openvim="service openvim"' >> ${HOME}/.bashrc
 
