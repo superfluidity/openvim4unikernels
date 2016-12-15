@@ -69,6 +69,8 @@ def load_configuration(configuration_file):
                      'log_level': "DEBUG",
                      'log_level_db': "ERROR",
                      'log_level_of': 'ERROR',
+                     'bridge_ifaces': {},
+                     'network_type': 'ovs',
             }
     try:
         #First load configuration from configuration file
@@ -214,7 +216,8 @@ if __name__=="__main__":
             #allow backward compatibility of test_mode option
             if 'test_mode' in config_dic and config_dic['test_mode']==True:
                 config_dic['mode'] = 'test' 
-        if config_dic['mode'] == 'development' and ( 'development_bridge' not in config_dic or config_dic['development_bridge'] not in config_dic.get("bridge_ifaces",None) ):
+        if config_dic['mode'] == 'development' and config_dic['network_type'] == 'bridge' and \
+                ( 'development_bridge' not in config_dic or config_dic['development_bridge'] not in config_dic.get("bridge_ifaces",None) ):
             logger.error("'%s' is not a valid 'development_bridge', not one of the 'bridge_ifaces'", config_file)
             exit(-1)
             

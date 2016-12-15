@@ -117,12 +117,13 @@ config_schema = {
         "log_level": log_level_schema,
         "log_level_db": log_level_schema,
         "log_level_of": log_level_schema,
+        "network_type": {"type": "string", "enum": ["ovs", "bridge"]},
     },
     "patternProperties": {
         "of_*" : {"type": ["string", "integer", "boolean"]}
     },
     "required": ['db_host', 'db_user', 'db_passwd', 'db_name',
-            'of_controller_ip', 'of_controller_port', 'of_controller_dpid', 'bridge_ifaces', 'of_controller'],
+            'of_controller_ip', 'of_controller_port', 'of_controller_dpid', 'of_controller'],
     "additionalProperties": False
 }
 

@@ -25,9 +25,8 @@
 This is thread that interact with the host and the libvirt to manage VM
 One thread will be launched per host 
 '''
-__author__="Pablo Montes, Alfonso Tierno"
-__date__ ="$10-jul-2014 12:07:15$"
-
+__author__ = "Pablo Montes, Alfonso Tierno, Leonardo Mirabal"
+__date__ = "$10-jul-2014 12:07:15$"
 
 import json
 import yaml
@@ -45,10 +44,12 @@ import random
 
 #TODO: insert a logging system
 
-global lvirt_module
-lvirt_module=None  #libvirt module is charged only if not in test mode
+
+#global lvirt_module
+#lvirt_module=None  #libvirt module is charged only if not in test mode
 
 class host_thread(threading.Thread):
+    lvirt_module = None
     def __init__(self, name, host, user, db, db_lock, test, image_path, host_id, version, develop_mode, develop_bridge_iface):
         '''Init a thread.
         Arguments: 
@@ -64,9 +65,11 @@ class host_thread(threading.Thread):
         self.db = db
         self.db_lock = db_lock
         self.test = test
-        if not test:
+
+        if not test and not host_thread.lvirt_module:
             try:
-                lvirt_module = imp.find_module("libvirt")
+                module_info = imp.find_module("libvirt")
+                host_thread.lvirt_module = imp.load_module("libvirt", *module_info)
             except (IOError, ImportError) as e:
                 raise ImportError("Cannot import python-libvirt. Openvim not properly installed" +str(e))
 
@@ -88,7 +91,8 @@ class host_thread(threading.Thread):
         
         self.queueLock = threading.Lock()
         self.taskQueue = Queue.Queue(2000)
-        
+        self.ssh_conn = None
+
     def ssh_connect(self):
         try:
             #Connect SSH
@@ -131,7 +135,7 @@ class host_thread(threading.Thread):
             except paramiko.ssh_exception.SSHException as e:
                 text = e.args[0]
                 print self.name, ": load_localinfo ssh Exception:", text
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
                 print self.name, ": load_localinfo libvirt Exception:", text
             except yaml.YAMLError as exc:
@@ -176,7 +180,7 @@ class host_thread(threading.Thread):
         except paramiko.ssh_exception.SSHException as e:
             text = e.args[0]
             print self.name, ": load_hostinfo ssh Exception:", text
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             text = e.get_error_message()
             print self.name, ": load_hostinfo libvirt Exception:", text
         except yaml.YAMLError as exc:
@@ -217,7 +221,7 @@ class host_thread(threading.Thread):
                 print self.name, ": save_localinfo ssh Exception:", text
                 if "SSH session not active" in text:
                     self.ssh_connect()
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
                 print self.name, ": save_localinfo libvirt Exception:", text
             except yaml.YAMLError as exc:
@@ -331,6 +335,27 @@ class host_thread(threading.Thread):
                 elif task[0] == 'restore-iface':
                     print self.name, ": processing task restore-iface %s mac=%s" % (task[1], task[2])
                     self.restore_iface(task[1], task[2])
+                elif task[0] == 'new-ovsbridge':
+                    print self.name, ": Creating compute OVS bridge"
+                    self.create_ovs_bridge()
+                    break
+                elif task[0] == 'new-vxlan':
+                    print self.name, ": Creating vxlan tunnel=" + task[1] + ", remote ip=" + task[2]
+                    self.create_ovs_vxlan_tunnel(task[1], task[2])
+                    break
+                elif task[0] == 'del-ovsbridge':
+                    print self.name, ": Deleting OVS bridge"
+                    self.delete_ovs_bridge()
+                    break
+                elif task[0] == 'del-vxlan':
+                    print self.name, ": Deleting vxlan " + task[1] + " tunnel"
+                    self.delete_ovs_vxlan_tunnel(task[1])
+                    break
+                elif task[0] == 'create-ovs-bridge-port':
+                    print self.name, ": Adding port ovim-" + task[1] + " to OVS bridge"
+                    self.create_ovs_bridge_port(task[1])
+                elif task[0] == 'del-ovs-port':
+                    self.delete_bridge_port_attached_to_ovs(task[1], task[2])
                 else:
                     print self.name, ": unknown task", task
                 
@@ -589,6 +614,10 @@ class host_thread(threading.Thread):
                         self.tab() + "<alias name='net" + str(net_nb)+ "'/>"
                 elif model==None:
                     model = "virtio"
+            elif content[0]['provider'][0:3] == "OVS":
+                vlan = content[0]['provider'].replace('OVS:', '')
+                text += self.tab() + "<interface type='bridge'>" + \
+                        self.inc_tab() + "<source bridge='ovim-" + vlan + "'/>"
             else:
                 return -1, 'Unknown Bridge net provider ' + content[0]['provider']
             if model!=None:
@@ -677,7 +706,182 @@ class host_thread(threading.Thread):
         """Decrement and return indentation according to xml_level"""
         self.xml_level -= 1
         return self.tab()
-    
+
+    def create_ovs_bridge(self):
+        """
+        Create a bridge in compute OVS to allocate VMs
+        :return: True if success
+        """
+        command = 'sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def delete_port_to_ovs_bridge(self, vlan, net_uuid):
+        """
+        Delete linux bridge port attched to a OVS bridge, if port is not free the port is not removed
+        :param vlan: vlan port id
+        :param net_uuid: network id
+        :return:
+        """
+
+        command = 'sudo ovs-vsctl del-port br-int ovim-' + vlan
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def is_port_free(self, vlan, net_uuid):
+        """
+        Check if por is free before delete from the compute.
+        :param vlan: vlan port id
+        :param net_uuid: network id
+        :return: True if is not free
+        """
+        self.db_lock.acquire()
+        result, content = self.db.get_table(
+            FROM='ports as p join instances as i on p.instance_id=i.uuid',
+            WHERE={"i.host_id":  self.host_id, 'p.type': 'instance:bridge', 'p.net_id':  net_uuid}
+        )
+        self.db_lock.release()
+
+        if content > 0:
+            return False
+        else:
+            return True
+
+    def add_port_to_ovs_bridge(self, vlan):
+        """
+        Add a bridge linux as a port to a OVS bridge and set a vlan for an specific linux bridge
+        :param vlan: vlan port id
+        :return:
+        """
+        command = 'sudo ovs-vsctl add-port br-int ovim-' + vlan + ' tag=' + vlan
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def delete_bridge_port_attached_to_ovs(self, vlan, net_uuid):
+        """
+        Delete from an existing OVS bridge a linux bridge port attached and the linux bridge itself.
+        :param vlan:
+        :param net_uuid:
+        :return: True if success
+        """
+        if not self.is_port_free(vlan, net_uuid):
+            return True
+        self.delete_port_to_ovs_bridge(vlan, net_uuid)
+        self.delete_linux_bridge(vlan)
+        return  True
+
+    def delete_linux_bridge(self, vlan):
+        """
+        Delete a linux bridge in a scpecific compute.
+        :param vlan: vlan port id
+        :return: True if success
+        """
+        command = 'sudo ifconfig ovim-' + vlan + ' down &&  sudo brctl delbr ovim-' + vlan
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def create_ovs_bridge_port(self, vlan):
+        """
+        Generate a linux bridge and attache the port to a OVS bridge
+        :param vlan: vlan port id
+        :return:
+        """
+        self.create_linux_bridge(vlan)
+        self.add_port_to_ovs_bridge(vlan)
+
+    def create_linux_bridge(self, vlan):
+        """
+        Create a linux bridge with STP active
+        :param vlan: netowrk vlan id
+        :return:
+        """
+        command = 'sudo brctl addbr ovim-' + vlan + ' && sudo ifconfig ovim-' + vlan + ' up'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        if len(content) != 0:
+            return False
+
+        command = 'sudo brctl stp ovim-' + vlan + ' on'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def create_ovs_vxlan_tunnel(self, vxlan_interface, remote_ip):
+        """
+        Create a vlxn tunnel between to computes with an OVS installed. STP is also active at port level
+        :param vxlan_interface: vlxan inteface name.
+        :param remote_ip: tunnel endpoint remote compute ip.
+        :return:
+        """
+        command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
+                  ' -- set Interface ' + vxlan_interface + '  type=vxlan options:remote_ip=' + remote_ip + \
+                  ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        print content
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def delete_ovs_vxlan_tunnel(self, vxlan_interface):
+        """
+        Delete a vlxan tunnel  port from a OVS brdige.
+        :param vxlan_interface: vlxan name to be delete it.
+        :return: True if success.
+        """
+        command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        print content
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def delete_ovs_bridge(self):
+        """
+        Delete a OVS bridge from  a compute.
+        :return: True if success
+        """
+        command = 'sudo ovs-vsctl del-br br-int'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
     def get_file_info(self, path):
         command = 'ls -lL --time-style=+%Y-%m-%dT%H:%M:%S ' + path
         print self.name, ': command:', command
@@ -944,7 +1148,7 @@ class host_thread(threading.Thread):
                 print self.name, ": create xml server error:", xml
                 return -2, xml
             print self.name, ": create xml:", xml
-            atribute = lvirt_module.VIR_DOMAIN_START_PAUSED if paused == "yes" else 0
+            atribute = host_thread.lvirt_module.VIR_DOMAIN_START_PAUSED if paused == "yes" else 0
         #4 Start the domain
             if not rebuild: #ensures that any pending destroying server is done
                 self.server_forceoff(True)
@@ -959,7 +1163,7 @@ class host_thread(threading.Thread):
             print self.name, ": launch_server(%s) ssh Exception: %s" %(server_id, text)
             if "SSH session not active" in text:
                 self.ssh_connect()
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             text = e.get_error_message()
             print self.name, ": launch_server(%s) libvirt Exception: %s"  %(server_id, text)
         except Exception as e:
@@ -982,26 +1186,26 @@ class host_thread(threading.Thread):
             return            
         
         try:
-            conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+            conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
             domains=  conn.listAllDomains() 
             domain_dict={}
             for domain in domains:
                 uuid = domain.UUIDString() ;
                 libvirt_status = domain.state()
                 #print libvirt_status
-                if libvirt_status[0] == lvirt_module.VIR_DOMAIN_RUNNING or libvirt_status[0] == lvirt_module.VIR_DOMAIN_SHUTDOWN:
+                if libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_RUNNING or libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_SHUTDOWN:
                     new_status = "ACTIVE"
-                elif libvirt_status[0] == lvirt_module.VIR_DOMAIN_PAUSED:
+                elif libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_PAUSED:
                     new_status = "PAUSED"
-                elif libvirt_status[0] == lvirt_module.VIR_DOMAIN_SHUTOFF:
+                elif libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_SHUTOFF:
                     new_status = "INACTIVE"
-                elif libvirt_status[0] == lvirt_module.VIR_DOMAIN_CRASHED:
+                elif libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_CRASHED:
                     new_status = "ERROR"
                 else:
                     new_status = None
                 domain_dict[uuid] = new_status
-            conn.close
-        except lvirt_module.libvirtError as e:
+            conn.close()
+        except host_thread.lvirt_module.libvirtError as e:
             print self.name, ": get_state() Exception '", e.get_error_message()
             return
 
@@ -1067,10 +1271,10 @@ class host_thread(threading.Thread):
                 self.create_image(None, req)
         else:
             try:
-                conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+                conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
                 try:
                     dom = conn.lookupByUUIDString(server_id)
-                except lvirt_module.libvirtError as e:
+                except host_thread.lvirt_module.libvirtError as e:
                     text = e.get_error_message()
                     if 'LookupByUUIDString' in text or 'Domain not found' in text or 'No existe un dominio coincidente' in text:
                         dom = None
@@ -1152,8 +1356,8 @@ class host_thread(threading.Thread):
                     else:
                         new_status = 'ACTIVE'
                 elif 'start' in req['action']:
-                    #La instancia está sólo en la base de datos pero no en la libvirt. es necesario crearla
-                    rebuild = True if req['action']['start']=='rebuild'  else False
+                    # The instance is only create in DB but not yet at libvirt domain, needs to be create
+                    rebuild = True if req['action']['start'] == 'rebuild'  else False
                     r = self.launch_server(conn, req, rebuild, dom)
                     if r[0] <0:
                         new_status = 'ERROR'
@@ -1196,8 +1400,8 @@ class host_thread(threading.Thread):
                         
         
                 conn.close()    
-            except lvirt_module.libvirtError as e:
-                if conn is not None: conn.close
+            except host_thread.lvirt_module.libvirtError as e:
+                if conn is not None: conn.close()
                 text = e.get_error_message()
                 new_status = "ERROR"
                 last_error = text
@@ -1253,7 +1457,7 @@ class host_thread(threading.Thread):
             return 0, None
         try:
             if not lib_conn:
-                conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+                conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
             else:
                 conn = lib_conn
                 
@@ -1264,13 +1468,13 @@ class host_thread(threading.Thread):
             iface.destroy()
             iface.create()
             print self.name, ": restore_iface '%s' %s" % (name, mac)
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             error_text = e.get_error_message()
             print self.name, ": restore_iface '%s' '%s' libvirt exception: %s" %(name, mac, error_text) 
             ret=-1
         finally:
             if lib_conn is None and conn is not None:
-                conn.close
+                conn.close()
         return ret, error_text
 
         
@@ -1354,12 +1558,12 @@ class host_thread(threading.Thread):
             
             try:
                 conn=None
-                conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+                conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
                 dom = conn.lookupByUUIDString(port["instance_id"])
                 if old_net:
                     text="\n".join(xml)
                     print self.name, ": edit_iface detaching SRIOV interface", text
-                    dom.detachDeviceFlags(text, flags=lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
+                    dom.detachDeviceFlags(text, flags=host_thread.lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
                 if new_net:
                     xml[-1] ="  <vlan>   <tag id='" + str(port['vlan']) + "'/>   </vlan>"
                     self.xml_level = 1
@@ -1367,14 +1571,14 @@ class host_thread(threading.Thread):
                     xml.append('</interface>')                
                     text="\n".join(xml)
                     print self.name, ": edit_iface attaching SRIOV interface", text
-                    dom.attachDeviceFlags(text, flags=lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
+                    dom.attachDeviceFlags(text, flags=host_thread.lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
                     
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
                 print self.name, ": edit_iface(",port["instance_id"],") libvirt exception:", text 
                 
             finally:
-                if conn is not None: conn.close
+                if conn is not None: conn.close()
                             
                               
 def create_server(server, db, db_lock, only_of_ports):

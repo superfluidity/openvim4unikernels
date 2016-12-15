@@ -1495,7 +1495,7 @@ class vim_db():
                 r,c = self.format_error(e, "new_instance", cmd)
                 if r!=-HTTP_Request_Timeout or retry_==1: return r,c
 
-    def delete_instance(self, instance_id, tenant_id, net_list, ports_to_free, logcause="requested by http"):
+    def delete_instance(self, instance_id, tenant_id, net_dataplane_list, ports_to_free, net_ovs_list, logcause="requested by http"):
         for retry_ in range(0,2):
             cmd=""
             try:
@@ -1515,7 +1515,16 @@ class vim_db():
                     self.cur.execute(cmd)
                     net_list__ = self.cur.fetchall()
                     for net in net_list__:
-                        net_list.append(net[0])
+                        net_dataplane_list.append(net[0])
+
+                    # get ovs manangement nets
+                    cmd = "SELECT DISTINCT net_id from ports WHERE instance_id = " \
+                          "'%s' AND net_id is not Null AND type='instance:bridge'" % instance_id
+                    self.logger.debug(cmd)
+                    self.cur.execute(cmd)
+                    net_list__ = self.cur.fetchall()
+                    for net in net_list__:
+                        net_ovs_list.append(net[0])
 
                     #get dataplane interfaces releases by this VM; both PF and VF with no other VF 
                     cmd="SELECT source_name, mac FROM (SELECT root_id, count(instance_id) as used FROM resources_port WHERE instance_id='%s' GROUP BY root_id ) AS A" % instance_id \

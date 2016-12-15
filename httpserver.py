@@ -26,8 +26,8 @@ This is the thread for the http server North API.
 Two thread will be launched, with normal and administrative permissions.
 '''
 
-__author__="Alfonso Tierno"
-__date__ ="$10-jul-2014 12:07:15$"
+__author__ = "Alfonso Tierno, Leonardo Mirabal"
+__date__ = "$10-jul-2014 12:07:15$"
 
 import bottle
 import urlparse
@@ -492,8 +492,12 @@ def enable_cors():
 
 @bottle.route(url_base + '/hosts', method='GET')
 def http_get_hosts():
-    select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_host,
-            ('id','name','description','status','admin_state_up') )
+    return format_out(get_hosts())
+
+
+def get_hosts():
+    select_, where_, limit_ = filter_query_string(bottle.request.query, http2db_host,
+                                                  ('id', 'name', 'description', 'status', 'admin_state_up', 'ip_name'))
     
     myself = config_dic['http_threads'][ threading.current_thread().name ]
     result, content = myself.db.get_table(FROM='hosts', SELECT=select_, WHERE=where_, LIMIT=limit_)
@@ -506,7 +510,7 @@ def http_get_hosts():
         for row in content:
             row['links'] = ( {'href': myself.url_preffix + '/hosts/' + str(row['id']), 'rel': 'bookmark'}, )
         data={'hosts' : content}
-        return format_out(data)
+        return data
 
 @bottle.route(url_base + '/hosts/<host_id>', method='GET')
 def http_get_host_id(host_id):
@@ -628,6 +632,12 @@ def http_post_hosts():
             thread.start()
             config_dic['host_threads'][ content['uuid'] ] = thread
 
+            if config_dic['network_type'] == 'ovs':
+                # create bridge
+                config_dic['host_threads'][content['uuid']].insert_task("new-ovsbridge")
+                # check if more host exist
+                create_vxlan_mesh(content['uuid'])
+
         #return host data
         change_keys_http2db(content, http2db_host, reverse=True)
         if len(warning_text)>0:
@@ -637,6 +647,50 @@ def http_post_hosts():
     else:
         bottle.abort(HTTP_Bad_Request, content)
         return
+
+
+def create_vxlan_mesh(host_id):
+    existing_hosts = get_hosts()
+    if len(existing_hosts['hosts']) > 1:
+        computes_available = existing_hosts['hosts']
+
+        # TUNEL openvim controller
+
+        for count, compute_owner in enumerate(computes_available):
+            for compute in computes_available:
+                if compute_owner['id'] == compute['id']:
+                    pass
+                else:
+                    vxlan_interface_name = get_vxlan_interface(compute_owner['id'][:8])
+                    config_dic['host_threads'][compute['id']].insert_task("new-vxlan",
+                                                                          vxlan_interface_name,
+                                                                          compute_owner['ip_name'])
+
+
+def delete_vxlan_mesh(host_id):
+    """
+    Create a task for remove a specific compute of the vlxan mesh
+    :param host_id: host id to be deleted.
+    """
+    existing_hosts = get_hosts()
+    computes_available = existing_hosts['hosts']
+    vxlan_interface_name = get_vxlan_interface(host_id[:8])
+
+    for compute in computes_available:
+        if host_id == compute['id']:
+            pass
+        else:
+            config_dic['host_threads'][compute['id']].insert_task("del-vxlan",vxlan_interface_name)
+
+
+def get_vxlan_interface(local_uuid):
+    """
+    Genearte a vxlan interface name
+    :param local_uuid: host id
+    :return: vlxan-8digits
+    """
+    return 'vxlan-' + local_uuid[:8]
+
 
 @bottle.route(url_base + '/hosts/<host_id>', method='PUT')
 def http_put_host_id(host_id):
@@ -659,11 +713,20 @@ def http_put_host_id(host_id):
         change_keys_http2db(content, http2db_host, reverse=True)
         data={'host' : content}
 
+        if config_dic['network_type'] == 'ovs':
+            delete_vxlan_mesh(host_id)
+            config_dic['host_threads'][host_id].insert_task("del-ovsbridge")
+
         #reload thread
         config_dic['host_threads'][host_id].name = content.get('name',content['ip_name'])
         config_dic['host_threads'][host_id].user = content['user']
         config_dic['host_threads'][host_id].host = content['ip_name']
         config_dic['host_threads'][host_id].insert_task("reload")
+
+        if config_dic['network_type'] == 'ovs':
+            # create mesh with new host data
+            config_dic['host_threads'][host_id].insert_task("new-ovsbridge")
+            create_vxlan_mesh(host_id)
 
         #print data
         return format_out(data)
@@ -682,9 +745,13 @@ def http_delete_host_id(host_id):
     result, content = my.db.delete_row('hosts', host_id)
     if result == 0:
         bottle.abort(HTTP_Not_Found, content)
-    elif result >0:
-        #terminate thread
+    elif result > 0:
+        if config_dic['network_type'] == 'ovs':
+            delete_vxlan_mesh(host_id)
+        # terminate thread
         if host_id in config_dic['host_threads']:
+            if config_dic['network_type'] == 'ovs':
+                config_dic['host_threads'][host_id].insert_task("del-ovsbridge")
             config_dic['host_threads'][host_id].insert_task("exit")
         #return data
         data={'result' : content}
@@ -1413,7 +1480,11 @@ def http_post_server_id(tenant_id):
     #Start server
         
         server['uuid'] = new_instance
-        #server_start = server.get('start', 'yes')
+        # server_start = server.get('start', 'yes')
+        if config_dic['network_type'] == 'ovs':
+            server_net = get_network_id(c2[0]['net_id'])
+            vlan = str(server_net['network']['provider:vlan'])
+            config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
         if server_start != 'no':
             server['paused'] = True if server_start == 'paused' else False 
             server['action'] = {"start":None}
@@ -1552,9 +1623,11 @@ def http_server_action(server_id, tenant_id, action):
     if new_status != None and new_status == 'DELETING':
         nets=[]
         ports_to_free=[]
-        #look for dhcp ip address 
+
+        net_ovs_list = []
+        #look for dhcp ip address
         r2, c2 = my.db.get_table(FROM="ports", SELECT=["mac", "net_id"], WHERE={"instance_id": server_id})
-        r,c = my.db.delete_instance(server_id, tenant_id, nets, ports_to_free, "requested by http")
+        r, c = my.db.delete_instance(server_id, tenant_id, nets, ports_to_free, net_ovs_list, "requested by http")
         for port in ports_to_free:
             r1,c1 = config_dic['host_threads'][ server['host_id'] ].insert_task( 'restore-iface',*port )
             if r1 < 0:
@@ -1573,7 +1646,12 @@ def http_server_action(server_id, tenant_id, action):
                     #print "dhcp insert del task"
                     if r < 0:
                         print ':http_post_servers ERROR UPDATING dhcp_server !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c 
-
+        if config_dic['network_type'] == 'ovs':
+            # delete ovs-port and linux bridge
+            for net in net_ovs_list:
+                server_net = get_network_id(net)
+                vlan = str(server_net['network']['provider:vlan'])
+                config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, server_net['network']['id'])
     return format_out(data)
 
 
@@ -1634,8 +1712,12 @@ def http_get_networks():
 
 @bottle.route(url_base + '/networks/<network_id>', method='GET')
 def http_get_network_id(network_id):
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #obtain data
+        data = get_network_id(network_id)
+        return format_out(data)
+
+def get_network_id(network_id):
+    my = config_dic['http_threads'][threading.current_thread().name]
+    # obtain data
     where_ = bottle.request.query
     where_['uuid'] = network_id
     result, content = my.db.get_table(FROM='nets', WHERE=where_, LIMIT=100)
@@ -1656,7 +1738,7 @@ def http_get_network_id(network_id):
             content[0]['ports'] = ports
         delete_nulls(content[0])      
         data={'network' : content[0]}
-        return format_out(data)
+        return data
 
 @bottle.route(url_base + '/networks', method='POST')
 def http_post_networks():
@@ -1739,8 +1821,7 @@ def http_post_networks():
         net_type='bridge_man' 
         
     if net_provider != None:
-        if net_provider[:7]=='bridge:':
-            #check it is one of the pre-provisioned bridges
+        if net_provider[:7] == 'bridge:':
             bridge_net_name = net_provider[7:]
             for brnet in config_dic['bridge_nets']:
                 if brnet[0]==bridge_net_name: # free
@@ -1753,7 +1834,7 @@ def http_post_networks():
 #            if bridge_net==None:     
 #                bottle.abort(HTTP_Bad_Request, "invalid 'provider:physical', bridge '%s' is not one of the provisioned 'bridge_ifaces' in the configuration file" % bridge_net_name)
 #                return
-    elif net_type=='bridge_data' or net_type=='bridge_man':
+    elif config_dic['network_type'] == 'bridge' and net_type =='bridge_data' or net_type ==  'bridge_man' :
         #look for a free precreated nets
         for brnet in config_dic['bridge_nets']:
             if brnet[3]==None: # free
@@ -1772,12 +1853,16 @@ def http_post_networks():
             print "using net", bridge_net
             net_provider = "bridge:"+bridge_net[0]
             net_vlan = bridge_net[1]
-    if net_vlan==None and (net_type=="data" or net_type=="ptp"):
+    elif net_type == 'bridge_data' or net_type == 'bridge_man' and config_dic['network_type'] == 'ovs':
+        net_provider = 'OVS'
+    if not net_vlan and (net_type == "data" or net_type == "ptp" or net_provider == "OVS"):
         net_vlan = my.db.get_free_net_vlan()
         if net_vlan < 0:
             bottle.abort(HTTP_Internal_Server_Error, "Error getting an available vlan")
             return
-    
+    if config_dic['network_type'] == 'ovs':
+        net_provider = 'OVS' + ":" + str(net_vlan)
+
     network['provider'] = net_provider
     network['type']     = net_type
     network['vlan']     = net_vlan
@@ -1787,7 +1872,7 @@ def http_post_networks():
         if bridge_net!=None:
             bridge_net[3] = content
         
-        if config_dic.get("dhcp_server"):
+        if config_dic.get("dhcp_server") and config_dic['network_type'] == 'bridge':
             if network["name"] in config_dic["dhcp_server"].get("nets", () ):
                 config_dic["dhcp_nets"].append(content)
                 print "dhcp_server: add new net", content
