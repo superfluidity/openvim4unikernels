@@ -21,7 +21,7 @@
 # contact with: nfvlabs@tid.es
 ##
 
-# Authors: Antonio Lopez, Pablo Montes, Alfonso Tierno
+# Authors: Antonio Lopez, Pablo Montes, Alfonso Tierno, Leonardo Mirabal
 # June 2015
 
 # Personalize RHEL7.1 on compute nodes
@@ -41,13 +41,14 @@
 # @base, @core, @development, @network-file-system-client, @virtualization-hypervisor, @virtualization-platform, @virtualization-tools
 
 
+
 function usage(){
-    echo -e "Usage: sudo $0 [-y] <user-name>  [ <iface-name>  [<ip-address>|dhcp] ]"
+    echo -e "Usage: sudo $0 [-f] <user-name> [<iface-for-overlay-bridges>]"
     echo -e "  Configure compute host for VIM usage. (version 0.4). Params:"
-    echo -e "     -y  do not prompt for confirmation. If a new user is created, the user name is set as password"
+    echo -e "     -f  do not prompt for confirmation. If a new user is created, the user name is set as password"
     echo -e "     <user-name> Create if not exist and configure this user for openvim to connect"
-    echo -e "     <iface-name> if suplied creates bridge interfaces on this interface, needed for openvim"
-    echo -e "     ip or dhcp if suplied, configure the interface with this ip address (/24) or 'dhcp' "
+    echo -e "     [<iface-for-overlay-bridges>] Only needed for old openvim versions. Iface to create pre-provioned bridges for network conectivity"
+
 }
 
 
@@ -57,9 +58,9 @@ function usage(){
 
 #1.2 input parameters
 FORCE=""
-while getopts "y" o; do
+while getopts "f" o; do
     case "${o}" in
-        y)
+        f)
             FORCE="yes"
             ;;
         *)
@@ -81,9 +82,9 @@ fi
 
 user_name=$1
 interface=$2
-ip_iface=$3
 
-if [ -n "$interface" ] && ! ifconfig $interface &> /dev/null
+
+if [ -z $interface ]  && ! ifconfig $interface &> /dev/null
 then
   echo "Error: interface '$interface' is not present in the system"
   usage
@@ -96,16 +97,13 @@ echo '
 #################################################################'
 
 # Required packages
-apt-get -y update
-#apt-get -y install grub-common screen virt-manager ethtool build-essential x11-common x11-utils x11-apps libguestfs-tools hwloc libguestfs-tools numactl vlan nfs-common nfs-kernel-server
-apt-get -y install grub-common screen virt-manager ethtool build-essential x11-common x11-utils libguestfs-tools hwloc libguestfs-tools numactl vlan nfs-common nfs-kernel-server
-
+apt-get -y  update
+apt-get -y  install grub-common screen virt-manager ethtool build-essential x11-common x11-utils \
+            libguestfs-tools hwloc libguestfs-tools numactl vlan nfs-common nfs-kernel-server openvswitch-switch
 echo "Remove unneeded packages....."
 apt-get -y autoremove
 # Selinux management
 #yum install -y policycoreutils-python
-
-
 
 echo '
 #################################################################
@@ -141,24 +139,19 @@ else
   fi
 fi
 
-## Allow admin users to access without password
-#if ! grep -q "#openmano" /etc/sudoers
-#then
-#    cat >> /home/${user_name}/script_visudo.sh << EOL
-##!/bin/bash
-#cat \$1 | awk '(\$0~"requiretty"){print "#"\$0}(\$0!~"requiretty"){print \$0}' > tmp
-#cat tmp > \$1
-#rm tmp
-#echo "" >> \$1
-#echo "#openmano allow to group admin to grant root privileges without password" >> \$1
-#echo "%admin ALL=(ALL) NOPASSWD: ALL" >> \$1
-#EOL
-#    chmod +x /home/${user_name}/script_visudo.sh
-#    echo "allowing admin user to get root privileges withut password"
-#    export EDITOR=/home/${user_name}/script_visudo.sh && sudo -E visudo
-#    rm -f /home/${user_name}/script_visudo.sh
-#fi
-
+# Allow admin users to access without password
+if ! grep -q "#openmano" /etc/sudoers
+then
+    cat >> /home/${user_name}/script_visudo.sh << EOL
+#!/bin/bash
+echo "#openmano allow to group admin to grant root privileges without password" >> \$1
+echo "${user_name} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+EOL
+    chmod +x /home/${user_name}/script_visudo.sh
+    echo "allowing admin user to get root privileges withut password"
+    export EDITOR=/home/${user_name}/script_visudo.sh && sudo -E visudo
+    rm -f /home/${user_name}/script_visudo.sh
+fi
 
 echo '
 #################################################################
@@ -365,107 +358,88 @@ echo "Interface ==> $interface"
 if [ -n "$interface" ]
 then
 
-
-  # For management and data interfaces
-  rm -f /etc/udev/rules.d/pci_config.rules # it will be created to define VFs
-
-
-  # Set ONBOOT=on and MTU=9000 on the interface used for the bridges
-  echo "configuring iface $interface"
-
-#MTU for interfaces and bridges
-MTU=9000
-
-cp /etc/network/interfaces interfaces.tmp
+    # For management and data interfaces
+    rm -f /etc/udev/rules.d/pci_config.rules # it will be created to define VFs
 
 
-  #Create infrastructure bridge, normally used for connecting to compute nodes, openflow controller, ...
+    # Set ONBOOT=on and MTU=9000 on the interface used for the bridges
+    echo "configuring iface $interface"
+
+    #MTU for interfaces and bridges
+    MTU=9000
+
+    cp /etc/network/interfaces interfaces.tmp
 
 
+    #Create infrastructure bridge, normally used for connecting to compute nodes, openflow controller, ...
     #Create VLAN for infrastructure bridge
 
- echo "
+echo "
 ######### CUTLINE #########
 
 auto ${interface}
 iface ${interface} inet manual
-    post-up ip link set dev ${interface} mtu ${MTU}
+post-up ip link set dev ${interface} mtu ${MTU}
 
 auto ${interface}.1001
 iface ${interface}.1001 inet manual
-    vlan-raw-device ${interface}
-    post-up ip link set mtu $MTU dev ${interface}.1001
+vlan-raw-device ${interface}
+post-up ip link set mtu $MTU dev ${interface}.1001
 " >> interfaces.tmp
 
-# echo "ifconfig ${interface} mtu $MTU
-# ifconfig ${interface} up
-#" > mtu.tmp
+        # echo "ifconfig ${interface} mtu $MTU
+        # ifconfig ${interface} up
+        #" > mtu.tmp
 
 
-  #Create bridge interfaces
-  echo "Creating bridge ifaces: "
-  for ((i=1;i<=20;i++))
-  do
-    i2digits=$i
-    [ $i -lt 10 ] && i2digits="0$i"
-    echo "    virbrMan$i  vlan 20$i2digits"
+    #Create bridge interfaces
+    echo "Creating bridge ifaces: "
+    for ((i=1;i<=20;i++))
+    do
+        i2digits=$i
+        [ $i -lt 10 ] && i2digits="0$i"
+        echo "    virbrMan$i  vlan 20$i2digits"
 
-    j=$i
+        j=$i
 
- echo "
+echo "
 auto ${interface}.20$i2digits
 iface ${interface}.20$i2digits inet manual
-    post-up ip link set mtu $MTU dev ${interface}.20$i2digits
+vlan-raw-device ${interface}
+post-up ip link set mtu $MTU dev ${interface}.20$i2digits
 
 auto virbrMan$j
 iface virbrMan$j inet manual
-	bridge_ports ${interface}.20$i2digits
-	post-up ip link set dev virbrMan$j && ip link set mtu 9000 dev virbrMan$j
+bridge_ports ${interface}.20$i2digits
+post-up ip link set dev virbrMan$j && ip link set mtu $MTU dev virbrMan$j
 " >> interfaces.tmp
 
-# echo "ifconfig ${interface}.20$i2digits mtu $MTU
-#ifconfig virbrMan$j mtu $MTU
-#ifconfig virbrMan$j up
-#" >> mtu.tmp
+    done
 
-  done
+    # echo "ifconfig em2.1001 mtu $MTU
+    #ifconfig virbrInf mtu $MTU
+    #ifconfig virbrInf up
+    #" >> mtu.tmp
 
- echo "
-auto em2.1001
-iface em2.1001 inet manual
-    post-up ip link set dev em2.1001 mtu 9000
-
-auto virbrInf
-iface virbrInf inet manual
-	bridge_ports em2.1001
-	post-up ip link set dev virbrInf && ip link set mtu 9000 dev virbrInf
-" >> interfaces.tmp
-
-# echo "ifconfig em2.1001 mtu $MTU
-#ifconfig virbrInf mtu $MTU
-#ifconfig virbrInf up
-#" >> mtu.tmp
-
-if ! grep -q "#### CUTLINE ####" /etc/network/interfaces
-then
-	echo "====== Copying interfaces.tmp to /etc/network/interfaces"
-	cp interfaces.tmp /etc/network/interfaces
-fi
+    if ! grep -q "#### CUTLINE ####" /etc/network/interfaces
+    then
+        echo "====== Copying interfaces.tmp to /etc/network/interfaces"
+        cp interfaces.tmp /etc/network/interfaces
+    fi
 
 
   #popd
 fi
 
-
-# Activate 8 Virtual Functions per PF on Niantic cards (ixgbe driver)
+################### Activate 8 Virtual Functions per PF on Niantic cards (ixgbe driver)
 if [[ `lsmod | cut -d" " -f1 | grep "ixgbe" | grep -v vf` ]]
-then
-	if ! grep -q "ixgbe" /etc/modprobe.d/ixgbe.conf
-	then
-	echo "options ixgbe max_vfs=8" >> /etc/modprobe.d/ixgbe.conf
-	fi
+    then
+        if ! grep -q "ixgbe" /etc/modprobe.d/ixgbe.conf
+        then
+        echo "options ixgbe max_vfs=8" >> /etc/modprobe.d/ixgbe.conf
+        fi
 
-fi
+    fi
 
 echo "#!/bin/bash" > /etc/activate-vfs.sh
 chmod +x /etc/activate-vfs.sh
@@ -524,7 +498,7 @@ exit 0" >> /etc/rc.local
 #fi
 
 chmod a+rwx /var/lib/libvirt/images
-mkdir /usr/libexec/
+mkdir -p /usr/libexec/
 pushd /usr/libexec/
 ln -s /usr/bin/qemu-system-x86_64 qemu-kvm
 popd
