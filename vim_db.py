@@ -216,6 +216,7 @@ class vim_db():
             'WHERE': dict of key:values, translated to key=value AND ... (Optional)
             'WHERE_NOT': dict of key:values, translated to key!=value AND ... (Optional)
             'WHERE_OR': dict of key:values, translated to key=value OR ... (Optional)
+            'WHERE_AND_OR: str 'AND' or 'OR'(by default) mark the priority to 'WHERE AND (WHERE_OR)' or (WHERE) OR WHERE_OR' (Optional)
             'LIMIT': limit of number of rows (Optional)
         Return: a list with dictionarys at each row
         '''
@@ -227,22 +228,25 @@ class vim_db():
         
         where_and = None
         where_or = None
-        if 'WHERE' in sql_dict and len(sql_dict['WHERE']) > 0:
-            w=sql_dict['WHERE']
-            where_and = " AND ".join(map( lambda x: str(x) + (" is Null" if w[x] is None else "='"+str(w[x])+"'"),  w.keys()) ) 
-        if 'WHERE_NOT' in sql_dict and len(sql_dict['WHERE_NOT']) > 0:
-            w=sql_dict['WHERE_NOT']
-            where_and_not = " AND ".join(map( lambda x: str(x) + (" is not Null" if w[x] is None else "!='"+str(w[x])+"'"),  w.keys()) ) 
+        w = sql_dict.get('WHERE')
+        if w:
+            where_and = " AND ".join(map( lambda x: str(x) + (" is Null" if w[x] is None else "='"+str(w[x])+"'"),  w.keys()) )
+        w = sql_dict.get('WHERE_NOT')
+        if w:
+            where_and_not = " AND ".join(map( lambda x: str(x) + (" is not Null" if w[x] is None else "!='"+str(w[x])+"'"),  w.keys()) )
             if where_and:
                 where_and += " AND " + where_and_not
             else:
                 where_and = where_and_not
-        if 'WHERE_OR' in sql_dict and len(sql_dict['WHERE_OR']) > 0:
-            w=sql_dict['WHERE_OR']
+        w = sql_dict.get('WHERE_OR')
+        if w:
             where_or =  " OR ".join(map( lambda x: str(x) + (" is Null" if w[x] is None else "='"+str(w[x])+"'"),  w.keys()) )
              
         if where_and!=None and where_or!=None:
-            where_ = "WHERE (" + where_and + ") OR " + where_or
+            if sql_dict.get("WHERE_AND_OR") == "AND":
+                where_ = "WHERE " + where_and + " AND (" + where_or + ")"
+            else:
+                where_ = "WHERE (" + where_and + ") OR " + where_or
         elif where_and!=None and where_or==None:
             where_ = "WHERE " + where_and
         elif where_and==None and where_or!=None:
