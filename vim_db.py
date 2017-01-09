@@ -218,10 +218,14 @@ class vim_db():
             'WHERE_OR': dict of key:values, translated to key=value OR ... (Optional)
             'WHERE_AND_OR: str 'AND' or 'OR'(by default) mark the priority to 'WHERE AND (WHERE_OR)' or (WHERE) OR WHERE_OR' (Optional)
             'LIMIT': limit of number of rows (Optional)
+            'DISTINCT': make a select distinct to remove repeated elements
         Return: a list with dictionarys at each row
         '''
         #print sql_dict
-        select_= "SELECT " + ("*" if 'SELECT' not in sql_dict else ",".join(map(str,sql_dict['SELECT'])) )
+        select_ = "SELECT "
+        if sql_dict.get("DISTINCT"):
+            select_ += "DISTINCT "
+        select_ += ("*" if 'SELECT' not in sql_dict else ",".join(map(str,sql_dict['SELECT'])) )
         #print 'select_', select_
         from_  = "FROM " + str(sql_dict['FROM'])
         #print 'from_', from_

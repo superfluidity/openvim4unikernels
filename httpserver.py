@@ -1046,7 +1046,7 @@ def http_get_images(tenant_id):
     else:
         from_  ='tenants_images right join images on tenants_images.image_id=images.uuid'
         where_or_ = {'tenant_id': tenant_id, 'public': 'yes'}
-    result, content = my.db.get_table(SELECT=select_, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND", LIMIT=limit_)
+    result, content = my.db.get_table(SELECT=select_, DISTINCT=True, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND", LIMIT=limit_)
     if result < 0:
         print "http_get_images Error", content
         bottle.abort(-result, content)
@@ -1073,7 +1073,7 @@ def http_get_image_id(tenant_id, image_id):
         from_  ='tenants_images as ti right join images as i on ti.image_id=i.uuid'
         where_or_ = {'tenant_id': tenant_id, 'public': "yes"}
     where_['uuid'] = image_id
-    result, content = my.db.get_table(SELECT=select_, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND", LIMIT=limit_)
+    result, content = my.db.get_table(SELECT=select_, DISTINCT=True, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND", LIMIT=limit_)
 
     if result < 0:
         print "http_get_images error %d %s" % (result, content)
