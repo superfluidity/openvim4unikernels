@@ -1227,10 +1227,11 @@ def http_put_image_id(tenant_id, image_id):
     where_={'uuid': image_id}
     if tenant_id=='any':
         from_  ='images'
+        where_or_ = None
     else:
-        from_  ='tenants_images as ti inner join images as i on ti.image_id=i.uuid'
-        where_['tenant_id'] = tenant_id
-    result, content = my.db.get_table(SELECT=('public',), FROM=from_, WHERE=where_)
+        from_  ='tenants_images as ti right join images as i on ti.image_id=i.uuid'
+        where_or_ = {'tenant_id': tenant_id, 'public': 'yes'}
+    result, content = my.db.get_table(SELECT=('public',), DISTINCT=True, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND")
     if result==0:
         text_error="Image '%s' not found" % image_id
         if tenant_id!='any':
@@ -1358,8 +1359,9 @@ def http_post_server_id(tenant_id):
         return
     server['flavor']=content[0]
     #check image valid and take info
-    result, content = my.db.get_table(FROM='tenants_images as ti join images as i on ti.image_id=i.uuid',
-        SELECT=('path','metadata'), WHERE={'uuid':server['image_id'], 'tenant_id':tenant_id, "status":"ACTIVE"})
+    result, content = my.db.get_table(FROM='tenants_images as ti right join images as i on ti.image_id=i.uuid',
+        SELECT=('path','metadata'), WHERE={'uuid':server['image_id'], "status":"ACTIVE"},
+        WHERE_OR={'tenant_id':tenant_id, 'public': 'yes'}, WHERE_AND_OR="AND", DISTINCT=True)
     if result<=0:
         bottle.abort(HTTP_Not_Found, 'image_id %s not found or not ACTIVE' % server['image_id'])
         return
@@ -1501,8 +1503,9 @@ def http_server_action(server_id, tenant_id, action):
                 else: #result==1
                     image_id = content[0]['image_id']    
                 
-        result, content = my.db.get_table(FROM='tenants_images as ti join images as i on ti.image_id=i.uuid',
-            SELECT=('path','metadata'), WHERE={'uuid':image_id, 'tenant_id':tenant_id, "status":"ACTIVE"})
+        result, content = my.db.get_table(FROM='tenants_images as ti right join images as i on ti.image_id=i.uuid',
+            SELECT=('path','metadata'), WHERE={'uuid':image_id, "status":"ACTIVE"},
+            WHERE_OR={'tenant_id':tenant_id, 'public': 'yes'}, WHERE_AND_OR="AND", DISTINCT=True)
         if result<=0:
             bottle.abort(HTTP_Not_Found, 'image_id %s not found or not ACTIVE' % image_id)
             return
