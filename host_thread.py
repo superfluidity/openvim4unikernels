@@ -45,10 +45,9 @@ import random
 
 #TODO: insert a logging system
 
-global lvirt_module
-lvirt_module=None  #libvirt module is charged only if not in test mode
 
 class host_thread(threading.Thread):
+    lvirt_module = None  # libvirt module is charged only if not in test mode
     def __init__(self, name, host, user, db, db_lock, test, image_path, host_id, version, develop_mode, develop_bridge_iface):
         '''Init a thread.
         Arguments: 
@@ -64,9 +63,10 @@ class host_thread(threading.Thread):
         self.db = db
         self.db_lock = db_lock
         self.test = test
-        if not test:
+        if not test and host_thread.lvirt_module == None:
             try:
-                lvirt_module = imp.find_module("libvirt")
+                module_info = imp.find_module("libvirt")
+                host_thread.lvirt_module = imp.load_module("libvirt", *module_info)
             except (IOError, ImportError) as e:
                 raise ImportError("Cannot import python-libvirt. Openvim not properly installed" +str(e))
 
@@ -131,7 +131,7 @@ class host_thread(threading.Thread):
             except paramiko.ssh_exception.SSHException as e:
                 text = e.args[0]
                 print self.name, ": load_localinfo ssh Exception:", text
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
                 print self.name, ": load_localinfo libvirt Exception:", text
             except yaml.YAMLError as exc:
@@ -176,7 +176,7 @@ class host_thread(threading.Thread):
         except paramiko.ssh_exception.SSHException as e:
             text = e.args[0]
             print self.name, ": load_hostinfo ssh Exception:", text
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             text = e.get_error_message()
             print self.name, ": load_hostinfo libvirt Exception:", text
         except yaml.YAMLError as exc:
@@ -217,7 +217,7 @@ class host_thread(threading.Thread):
                 print self.name, ": save_localinfo ssh Exception:", text
                 if "SSH session not active" in text:
                     self.ssh_connect()
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
                 print self.name, ": save_localinfo libvirt Exception:", text
             except yaml.YAMLError as exc:
@@ -944,7 +944,7 @@ class host_thread(threading.Thread):
                 print self.name, ": create xml server error:", xml
                 return -2, xml
             print self.name, ": create xml:", xml
-            atribute = lvirt_module.VIR_DOMAIN_START_PAUSED if paused == "yes" else 0
+            atribute = host_thread.lvirt_module.VIR_DOMAIN_START_PAUSED if paused == "yes" else 0
         #4 Start the domain
             if not rebuild: #ensures that any pending destroying server is done
                 self.server_forceoff(True)
@@ -959,7 +959,7 @@ class host_thread(threading.Thread):
             print self.name, ": launch_server(%s) ssh Exception: %s" %(server_id, text)
             if "SSH session not active" in text:
                 self.ssh_connect()
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             text = e.get_error_message()
             print self.name, ": launch_server(%s) libvirt Exception: %s"  %(server_id, text)
         except Exception as e:
@@ -982,26 +982,26 @@ class host_thread(threading.Thread):
             return            
         
         try:
-            conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+            conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
             domains=  conn.listAllDomains() 
             domain_dict={}
             for domain in domains:
                 uuid = domain.UUIDString() ;
                 libvirt_status = domain.state()
                 #print libvirt_status
-                if libvirt_status[0] == lvirt_module.VIR_DOMAIN_RUNNING or libvirt_status[0] == lvirt_module.VIR_DOMAIN_SHUTDOWN:
+                if libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_RUNNING or libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_SHUTDOWN:
                     new_status = "ACTIVE"
-                elif libvirt_status[0] == lvirt_module.VIR_DOMAIN_PAUSED:
+                elif libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_PAUSED:
                     new_status = "PAUSED"
-                elif libvirt_status[0] == lvirt_module.VIR_DOMAIN_SHUTOFF:
+                elif libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_SHUTOFF:
                     new_status = "INACTIVE"
-                elif libvirt_status[0] == lvirt_module.VIR_DOMAIN_CRASHED:
+                elif libvirt_status[0] == host_thread.lvirt_module.VIR_DOMAIN_CRASHED:
                     new_status = "ERROR"
                 else:
                     new_status = None
                 domain_dict[uuid] = new_status
             conn.close
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             print self.name, ": get_state() Exception '", e.get_error_message()
             return
 
@@ -1067,10 +1067,10 @@ class host_thread(threading.Thread):
                 self.create_image(None, req)
         else:
             try:
-                conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+                conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
                 try:
                     dom = conn.lookupByUUIDString(server_id)
-                except lvirt_module.libvirtError as e:
+                except host_thread.lvirt_module.libvirtError as e:
                     text = e.get_error_message()
                     if 'LookupByUUIDString' in text or 'Domain not found' in text or 'No existe un dominio coincidente' in text:
                         dom = None
@@ -1196,7 +1196,7 @@ class host_thread(threading.Thread):
                         
         
                 conn.close()    
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 if conn is not None: conn.close
                 text = e.get_error_message()
                 new_status = "ERROR"
@@ -1253,7 +1253,7 @@ class host_thread(threading.Thread):
             return 0, None
         try:
             if not lib_conn:
-                conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+                conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
             else:
                 conn = lib_conn
                 
@@ -1264,7 +1264,7 @@ class host_thread(threading.Thread):
             iface.destroy()
             iface.create()
             print self.name, ": restore_iface '%s' %s" % (name, mac)
-        except lvirt_module.libvirtError as e:
+        except host_thread.lvirt_module.libvirtError as e:
             error_text = e.get_error_message()
             print self.name, ": restore_iface '%s' '%s' libvirt exception: %s" %(name, mac, error_text) 
             ret=-1
@@ -1354,12 +1354,12 @@ class host_thread(threading.Thread):
             
             try:
                 conn=None
-                conn = lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
+                conn = host_thread.lvirt_module.open("qemu+ssh://"+self.user+"@"+self.host+"/system")
                 dom = conn.lookupByUUIDString(port["instance_id"])
                 if old_net:
                     text="\n".join(xml)
                     print self.name, ": edit_iface detaching SRIOV interface", text
-                    dom.detachDeviceFlags(text, flags=lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
+                    dom.detachDeviceFlags(text, flags=host_thread.lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
                 if new_net:
                     xml[-1] ="  <vlan>   <tag id='" + str(port['vlan']) + "'/>   </vlan>"
                     self.xml_level = 1
@@ -1367,9 +1367,9 @@ class host_thread(threading.Thread):
                     xml.append('</interface>')                
                     text="\n".join(xml)
                     print self.name, ": edit_iface attaching SRIOV interface", text
-                    dom.attachDeviceFlags(text, flags=lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
+                    dom.attachDeviceFlags(text, flags=host_thread.lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
                     
-            except lvirt_module.libvirtError as e:
+            except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
                 print self.name, ": edit_iface(",port["instance_id"],") libvirt exception:", text 
                 
