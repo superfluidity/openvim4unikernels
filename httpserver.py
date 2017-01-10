@@ -26,7 +26,7 @@ This is the thread for the http server North API.
 Two thread will be launched, with normal and administrative permissions.
 '''
 
-__author__="Alfonso Tierno"
+__author__="Alfonso Tierno, Gerardo Garcia"
 __date__ ="$10-jul-2014 12:07:15$"
 
 import bottle
@@ -72,6 +72,11 @@ def md5(fname):
     with open(fname, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+def md5_string(fname):
+    hash_md5 = hashlib.md5()
+    hash_md5.update(fname)
     return hash_md5.hexdigest()
 
 def check_extended(extended, allow_net_attach=False):
@@ -1039,7 +1044,7 @@ def http_get_images(tenant_id):
         bottle.abort(result, content)
     #obtain data
     select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_image,
-            ('id','name','description','path','public') )
+            ('id','name','checksum','description','path','public') )
     if tenant_id=='any':
         from_  ='images'
         where_or_ = None
@@ -1065,7 +1070,7 @@ def http_get_image_id(tenant_id, image_id):
         bottle.abort(result, content)
     #obtain data
     select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_image,
-            ('id','name','description','progress', 'status','path', 'created', 'updated','public') )
+            ('id','name','checksum','description','progress', 'status','path', 'created', 'updated','public') )
     if tenant_id=='any':
         from_  ='images'
         where_or_ = None
@@ -1108,15 +1113,26 @@ def http_post_images(tenant_id):
     if metadata_dict is not None: 
         http_content['image']['metadata'] = json.dumps(metadata_dict)
     #calculate checksum
-    host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
     try:
         image_file = http_content['image'].get('path',None)
-        if os.path.exists(image_file):
-            http_content['image']['checksum'] = md5(image_file)
-        elif is_url(image_file):
-            pass
+        parsed_url = urlparse.urlparse(image_file)
+        if parsed_url.scheme == "" and parsed_url.netloc == "":
+            # The path is a local file
+            if os.path.exists(image_file):
+                http_content['image']['checksum'] = md5(image_file)
         else:
-            if not host_test_mode:
+            # The path is a URL. Code should be added to download the image and calculate the checksum
+            #http_content['image']['checksum'] = md5(downloaded_image)
+            pass
+        # Finally, only if we are in test mode and checksum has not been calculated, we calculate it from the path
+        host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
+        if host_test_mode:
+            if 'checksum' not in http_content['image']:
+                http_content['image']['checksum'] = md5_string(image_file)
+        else:
+            # At this point, if the path is a local file and no chechsum has been obtained yet, an error is sent back.
+            # If it is a URL, no error is sent. Checksum will be an empty string
+            if parsed_url.scheme == "" and parsed_url.netloc == "" and 'checksum' not in http_content['image']:
                 content = "Image file not found"
                 print "http_post_images error: %d %s" % (HTTP_Bad_Request, content)
                 bottle.abort(HTTP_Bad_Request, content)
