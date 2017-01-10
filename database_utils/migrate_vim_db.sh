@@ -176,6 +176,7 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 4002 ] && DATABASE_TARGET_VER_NUM=6   #0.4.2   =>  6
 [ $OPENVIM_VER_NUM -ge 4005 ] && DATABASE_TARGET_VER_NUM=7   #0.4.5   =>  7
 [ $OPENVIM_VER_NUM -ge 4010 ] && DATABASE_TARGET_VER_NUM=8   #0.4.10   =>  8
+[ $OPENVIM_VER_NUM -ge 5001 ] && DATABASE_TARGET_VER_NUM=9   #0.5.1   =>  9
 #TODO ... put next versions here
 
 
@@ -450,6 +451,21 @@ function downgrade_from_8(){
     echo "     remove column 'checksum' from 'images'"
     echo "ALTER TABLE images DROP COLUMN checksum;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '8';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function upgrade_to_9(){
+    echo "    upgrade database from version 0.8 to version 0.9"
+    echo "     change length of columns 'path' and 'name' to 255 in table 'images', and change length of column 'name' to 255 in table 'flavors'"
+    echo "ALTER TABLE images CHANGE COLUMN path path VARCHAR(255) NOT NULL AFTER uuid, CHANGE COLUMN name name VARCHAR(255) NOT NULL AFTER path;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE flavors CHANGE COLUMN name name VARCHAR(255) NOT NULL AFTER uuid;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (9, '0.9', '0.5.1', 'increase length of columns path and name to 255 in table images, and change length of column name to 255 in table flavors', '2017-01-10');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+function downgrade_from_9(){
+    echo "    downgrade database from version 0.9 to version 0.8"
+    echo "     change length of columns 'path' and 'name' to 100 and 64 in table 'images'"
+    echo "ALTER TABLE images CHANGE COLUMN path path VARCHAR(100) NOT NULL AFTER uuid, CHANGE COLUMN name name VARCHAR(64) NOT NULL AFTER path;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE flavors CHANGE COLUMN name name VARCHAR(64) NOT NULL AFTER uuid;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '9';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 #TODO ... put funtions here
