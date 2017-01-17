@@ -1376,12 +1376,24 @@ def http_post_server_id(tenant_id):
     server['flavor']=content[0]
     #check image valid and take info
     result, content = my.db.get_table(FROM='tenants_images as ti right join images as i on ti.image_id=i.uuid',
-        SELECT=('path','metadata'), WHERE={'uuid':server['image_id'], "status":"ACTIVE"},
-        WHERE_OR={'tenant_id':tenant_id, 'public': 'yes'}, WHERE_AND_OR="AND", DISTINCT=True)
+                                      SELECT=('path', 'metadata', 'image_id'),
+                                      WHERE={'uuid':server['image_id'], "status":"ACTIVE"},
+                                      WHERE_OR={'tenant_id':tenant_id, 'public': 'yes'},
+                                      WHERE_AND_OR="AND",
+                                      DISTINCT=True)
     if result<=0:
         bottle.abort(HTTP_Not_Found, 'image_id %s not found or not ACTIVE' % server['image_id'])
         return
-    server['image']=content[0]
+    for image_dict in content:
+        if image_dict.get("image_id"):
+            break
+    else:
+        # insert in data base tenants_images
+        r2, c2 = my.db.new_row('tenants_images', {'image_id': server['image_id'], 'tenant_id': tenant_id})
+        if r2<=0:
+            bottle.abort(HTTP_Not_Found, 'image_id %s cannot be used. Error %s' % (server['image_id'], c2))
+            return
+    server['image']={"path": content[0]["path"], "metadata": content[0]["metadata"]}
     if "hosts_id" in server:
         result, content = my.db.get_table(FROM='hosts', SELECT=('uuid',), WHERE={'uuid': server['host_id']})
         if result<=0:
