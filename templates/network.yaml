@@ -29,4 +29,6 @@ network:
                               #    default            : attached to the default host interface
                               #    null               : for data or ptp types. (To be changed in future versions)
     shared:              true # true, false: if shared it will consider by OPENVIM an EXTERNAL network available at OPENMANO
+    enable_dhcp : true # true, false to activate network dhcp over copmutes OVS mesh
+    cidr:  10.0.0.0/24        # Network CIDR from which to include or exclude addresses used for DHCP service lease offerings.
 

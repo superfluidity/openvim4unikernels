@@ -37,6 +37,7 @@ import uuid as myUuid
 import auxiliary_functions as af
 import json
 import logging
+from netaddr import IPNetwork, IPSet, IPRange, all_matching_cidrs
 
 HTTP_Bad_Request = 400
 HTTP_Unauthorized = 401 
@@ -1389,8 +1390,21 @@ class vim_db():
                     #insert resources
                     nb_bridge_ifaces = nb_cores = nb_ifaces = nb_numas = 0
                     #insert bridged_ifaces
+
                     for iface in bridgedifaces:
                         #generate and insert a iface uuid
+                        if 'enable_dhcp' in iface and iface['enable_dhcp']:
+                            dhcp_first_ip = iface["dhcp_first_ip"]
+                            del iface["dhcp_first_ip"]
+                            dhcp_last_ip = iface["dhcp_last_ip"]
+                            del iface["dhcp_last_ip"]
+                            dhcp_cidr = iface["cidr"]
+                            del iface["cidr"]
+                            del iface["enable_dhcp"]
+                            used_dhcp_ips = self._get_dhcp_ip_used_list(iface["net_id"])
+                            iface["ip_address"] = self.get_free_ip_from_range(dhcp_first_ip, dhcp_last_ip,
+                                                                              dhcp_cidr, used_dhcp_ips)
+
                         iface['uuid'] = str(myUuid.uuid1()) # create_uuid
                         cmd = "INSERT INTO uuids (uuid, root_uuid, used_at) VALUES ('%s','%s', 'ports')" % (iface['uuid'], uuid)
                         self.logger.debug(cmd)
@@ -1497,6 +1511,58 @@ class vim_db():
                 r,c = self.format_error(e, "new_instance", cmd)
                 if r!=-HTTP_Request_Timeout or retry_==1: return r,c
 
+    def get_free_ip_from_range(self, first_ip, last_ip, cidr, ip_used_list):
+        """
+        Calculate a free IP from a range given
+        :param first_ip: First dhcp ip range
+        :param last_ip: Last dhcp ip range
+        :param cidr: net cidr
+        :param ip_used_list: contain all used ips to avoid ip collisions
+        :return:
+        """
+
+        ip_tools = IPNetwork(cidr)
+        cidr_len = ip_tools.prefixlen
+        ips = IPNetwork(first_ip + '/' + str(cidr_len))
+        ip_used_list.append(str(ips[0])) # first ip
+        ip_used_list.append(str(ips[1])) # gw ip
+        ip_used_list.append(str(ips[-1])) # broadcast ip
+        for vm_ip in ips:
+            if str(vm_ip) not in ip_used_list:
+                return vm_ip
+
+        return None
+
+    def _get_dhcp_ip_used_list(self, net_id):
+        """
+        REtreive from DB all ips already used by the dhcp server for a given net
+        :param net_id:
+        :return:
+        """
+        WHERE={'type': 'instance:ovs', 'net_id': net_id}
+        for retry_ in range(0, 2):
+            cmd = ""
+            self.cur = self.con.cursor(mdb.cursors.DictCursor)
+            select_ = "SELECT uuid, ip_address FROM ports "
+
+            if WHERE is None or len(WHERE) == 0:
+                where_ = ""
+            else:
+                where_ = "WHERE " + " AND ".join(
+                    map(lambda x: str(x) + (" is Null" if WHERE[x] is None else "='" + str(WHERE[x]) + "'"),
+                        WHERE.keys()))
+            limit_ = "LIMIT 100"
+            cmd = " ".join((select_, where_, limit_))
+            self.logger.debug(cmd)
+            self.cur.execute(cmd)
+            ports = self.cur.fetchall()
+            ip_address_list = []
+            for port in ports:
+                ip_address_list.append(port['ip_address'])
+
+            return ip_address_list
+
+
     def delete_instance(self, instance_id, tenant_id, net_dataplane_list, ports_to_free, net_ovs_list, logcause="requested by http"):
         for retry_ in range(0,2):
             cmd=""
@@ -1520,7 +1586,7 @@ class vim_db():
                         net_dataplane_list.append(net[0])
 
                     # get ovs manangement nets
-                    cmd = "SELECT DISTINCT net_id, vlan FROM ports WHERE instance_id='{}' AND net_id is not Null AND "\
+                    cmd = "SELECT DISTINCT net_id, vlan, ip_address, mac FROM ports WHERE instance_id='{}' AND net_id is not Null AND "\
                             "type='instance:ovs'".format(instance_id)
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)

@@ -71,6 +71,8 @@ def load_configuration(configuration_file):
                      'log_level_of': 'ERROR',
                      'bridge_ifaces': {},
                      'network_type': 'ovs',
+                     'ovs_controller_user': 'osm_dhcp',
+                     'ovs_controller_file_path': '/var/lib/',
             }
     try:
         #First load configuration from configuration file
@@ -220,7 +222,7 @@ if __name__=="__main__":
                 ( 'development_bridge' not in config_dic or config_dic['development_bridge'] not in config_dic.get("bridge_ifaces",None) ):
             logger.error("'%s' is not a valid 'development_bridge', not one of the 'bridge_ifaces'", config_file)
             exit(-1)
-            
+
         if config_dic['mode'] != 'normal':
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
             print "!! Warning, openvimd in TEST mode '%s'" % config_dic['mode']

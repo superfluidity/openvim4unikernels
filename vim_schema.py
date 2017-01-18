@@ -118,6 +118,10 @@ config_schema = {
         "log_level_db": log_level_schema,
         "log_level_of": log_level_schema,
         "network_type": {"type": "string", "enum": ["ovs", "bridge"]},
+        "ovs_controller_file_path": path_schema,
+        "ovs_controller_user": nameshort_schema,
+
+        "ovs_controller_ip": nameshort_schema
     },
     "patternProperties": {
         "of_*" : {"type": ["string", "integer", "boolean"]}
@@ -626,8 +630,8 @@ network_update_schema = {
                 "provider:physical":net_bind_schema,
                 "cidr":cidr_schema,
                 "enable_dhcp": {"type":"boolean"},
-                "dhcp_first_ip": ip_schema,
-                "dhcp_last_ip": ip_schema,
+                # "dhcp_first_ip": ip_schema,
+                # "dhcp_last_ip": ip_schema,
                 "bind_net":name_schema, #can be name, or uuid
                 "bind_type":{"oneOf":[{"type":"null"},{"type":"string", "pattern":"^vlan:[0-9]{1,4}$"}]}
             },

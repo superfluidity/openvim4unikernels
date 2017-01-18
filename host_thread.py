@@ -39,20 +39,25 @@ from jsonschema import validate as js_v, exceptions as js_e
 import imp
 from vim_schema import localinfo_schema, hostinfo_schema
 import random
-#from logging import Logger
-#import auxiliary_functions as af
-
-#TODO: insert a logging system
+import os
 
 
-#global lvirt_module
-#lvirt_module=None  #libvirt module is charged only if not in test mode
+# from logging import Logger
+# import auxiliary_functions as af
+
+# TODO: insert a logging system
+
+
+# global lvirt_module
+# lvirt_module=None  #libvirt module is charged only if not in test mode
 
 class host_thread(threading.Thread):
     lvirt_module = None
-    def __init__(self, name, host, user, db, db_lock, test, image_path, host_id, version, develop_mode, develop_bridge_iface):
+
+    def __init__(self, name, host, user, db, db_lock, test, image_path, host_id, version, develop_mode,
+                 develop_bridge_iface):
         '''Init a thread.
-        Arguments: 
+        Arguments:
             'id' number of thead
             'name' name of thread
             'host','user':  host ip or name to manage and user
@@ -731,7 +736,11 @@ class host_thread(threading.Thread):
         :return:
         """
 
-        command = 'sudo ovs-vsctl del-port br-int ovim-' + vlan
+        if self.test:
+            return
+
+        port_name = 'ovim-' + vlan
+        command = 'sudo ovs-vsctl del-port br-int ' + port_name
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
         content = stdout.read()
@@ -740,21 +749,73 @@ class host_thread(threading.Thread):
         else:
             return False
 
-    def is_port_free(self, vlan, net_uuid):
+    def delete_dhcp_server(self, vlan, net_uuid, dhcp_path):
         """
-        Check if there not ovs ports of a network in a compute host.
-        :param vlan: vlan port id
+        Delete dhcp server process lining in namespace
+        :param vlan: segmentation id
+        :param net_uuid: network uuid
+        :param dhcp_path: conf fiel path that live in namespace side
+        :return:
+        """
+        if self.test:
+            return
+        if not self.is_dhcp_port_free(vlan, net_uuid):
+            return True
+
+        net_namespace = 'ovim-' + vlan
+        dhcp_path = os.path.join(dhcp_path, net_namespace)
+        pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
+
+        command = 'sudo ip netns exec ' + net_namespace + ' cat ' + pid_file
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip netns exec ' + net_namespace + ' kill -9 ' + content
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # if len(content) == 0:
+        #     return True
+        # else:
+        #     return False
+
+    def is_dhcp_port_free(self, host_id, net_uuid):
+        """
+        Check if any port attached to the a net in a vxlan mesh across computes nodes
+        :param host_id: host id
         :param net_uuid: network id
         :return: True if is not free
         """
         self.db_lock.acquire()
         result, content = self.db.get_table(
-            FROM='ports as p join instances as i on p.instance_id=i.uuid',
-            WHERE={"i.host_id":  self.host_id, 'p.type': 'instance:ovs', 'p.net_id':  net_uuid}
+            FROM='ports',
+            WHERE={'p.type': 'instance:ovs', 'p.net_id': net_uuid}
         )
         self.db_lock.release()
 
-        if content > 0:
+        if len(content) > 0:
+            return False
+        else:
+            return True
+
+    def is_port_free(self, host_id, net_uuid):
+        """
+        Check if there not ovs ports of a network in a compute host.
+        :param host_id:  host id
+        :param net_uuid: network id
+        :return: True if is not free
+        """
+
+        self.db_lock.acquire()
+        result, content = self.db.get_table(
+            FROM='ports as p join instances as i on p.instance_id=i.uuid',
+            WHERE={"i.host_id": self.host_id, 'p.type': 'instance:ovs', 'p.net_id': net_uuid}
+        )
+        self.db_lock.release()
+
+        if len(content) > 0:
             return False
         else:
             return True
@@ -763,9 +824,14 @@ class host_thread(threading.Thread):
         """
         Add a bridge linux as a port to a OVS bridge and set a vlan for an specific linux bridge
         :param vlan: vlan port id
-        :return:
+        :return: True if success
         """
-        command = 'sudo ovs-vsctl add-port br-int ovim-' + vlan + ' tag=' + vlan
+
+        if self.test:
+            return
+
+        port_name = 'ovim-' + vlan
+        command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + vlan
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
         content = stdout.read()
@@ -773,6 +839,22 @@ class host_thread(threading.Thread):
             return True
         else:
             return False
+
+    def delete_dhcp_port(self, vlan, net_uuid):
+        """
+        Delete from an existing OVS bridge a linux bridge port attached and the linux bridge itself.
+        :param vlan: segmentation id
+        :param net_uuid: network id
+        :return: True if success
+        """
+
+        if self.test:
+            return
+
+        if not self.is_dhcp_port_free(vlan, net_uuid):
+            return True
+        self.delete_dhcp_interfaces(vlan)
+        return True
 
     def delete_bridge_port_attached_to_ovs(self, vlan, net_uuid):
         """
@@ -783,11 +865,12 @@ class host_thread(threading.Thread):
         """
         if self.test:
             return
+
         if not self.is_port_free(vlan, net_uuid):
             return True
         self.delete_port_to_ovs_bridge(vlan, net_uuid)
         self.delete_linux_bridge(vlan)
-        return  True
+        return True
 
     def delete_linux_bridge(self, vlan):
         """
@@ -795,7 +878,20 @@ class host_thread(threading.Thread):
         :param vlan: vlan port id
         :return: True if success
         """
-        command = 'sudo ifconfig ovim-' + vlan + ' down &&  sudo brctl delbr ovim-' + vlan
+
+        if self.test:
+            return
+
+        port_name = 'ovim-' + vlan
+        command = 'sudo ip link set dev veth0-' + vlan + ' down'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        #
+        # if len(content) != 0:
+        #     return False
+
+        command = 'sudo ifconfig ' + port_name + ' down &&  sudo brctl delbr ' + port_name
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
         content = stdout.read()
@@ -821,15 +917,247 @@ class host_thread(threading.Thread):
         :param vlan: netowrk vlan id
         :return:
         """
-        command = 'sudo brctl addbr ovim-' + vlan + ' && sudo ifconfig ovim-' + vlan + ' up'
+
+        if self.test:
+            return
+
+        port_name = 'ovim-' + vlan
+        command = 'sudo brctl show | grep ' + port_name
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
         content = stdout.read()
 
-        if len(content) != 0:
+        # if exist nothing to create
+        # if len(content) == 0:
+        #     return False
+
+        command = 'sudo brctl addbr ' + port_name
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # if len(content) == 0:
+        #     return True
+        # else:
+        #     return False
+
+        command = 'sudo brctl stp ' + port_name + ' on'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # if len(content) == 0:
+        #     return True
+        # else:
+        #     return False
+        command = 'sudo ip link set dev ' + port_name + ' up'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        if len(content) == 0:
+            return True
+        else:
             return False
 
-        command = 'sudo brctl stp ovim-' + vlan + ' on'
+    def set_mac_dhcp_server(self, ip, mac, vlan, netmask, dhcp_path):
+        """
+        Write into dhcp conf file a rule to assigned a fixed ip given to an specific MAC address
+        :param ip: IP address asigned to a VM
+        :param mac: VM vnic mac to be macthed with the IP received
+        :param vlan: Segmentation id
+        :param netmask: netmask value
+        :param path: dhcp conf file path that live in namespace side
+        :return: True if success
+        """
+
+        if self.test:
+            return
+
+        net_namespace = 'ovim-' + vlan
+        dhcp_path = os.path.join(dhcp_path, net_namespace)
+        dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
+
+        if not ip:
+            return False
+
+        ip_data = mac.upper() + ',' + ip
+
+        command = 'sudo  ip netns exec ' + net_namespace + ' touch ' + dhcp_hostsdir
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo  ip netns exec ' + net_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
+
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def delete_mac_dhcp_server(self, ip, mac, vlan, dhcp_path):
+        """
+        Delete into dhcp conf file the ip  assigned to a specific MAC address
+
+        :param ip: IP address asigned to a VM
+        :param mac:  VM vnic mac to be macthed with the IP received
+        :param vlan:  Segmentation id
+        :param dhcp_path: dhcp conf file path that live in namespace side
+        :return:
+        """
+
+        if self.test:
+            return
+
+        net_namespace = 'ovim-' + vlan
+        dhcp_path = os.path.join(dhcp_path, net_namespace)
+        dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
+
+        if not ip:
+            return False
+
+        ip_data = mac.upper() + ',' + ip
+
+        command = 'sudo  ip netns exec ' + net_namespace + ' sudo sed -i \'/' + ip_data + '/d\' ' + dhcp_hostsdir
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path):
+        """
+        Generate a linux bridge and attache the port to a OVS bridge
+        :param self:
+        :param vlan: Segmentation id
+        :param ip_range: IP dhcp range
+        :param netmask: network netmask
+        :param dhcp_path: dhcp conf file path that live in namespace side
+        :return: True if success
+        """
+
+        if self.test:
+            return
+
+        interface = 'tap-' + vlan
+        net_namespace = 'ovim-' + vlan
+        dhcp_path = os.path.join(dhcp_path, net_namespace)
+        leases_path = os.path.join(dhcp_path, "dnsmasq.leases")
+        pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
+
+        dhcp_range = ip_range[0] + ',' + ip_range[1] + ',' + netmask
+
+        command = 'sudo ip netns exec ' + net_namespace + ' mkdir -p ' + dhcp_path
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        pid_path = os.path.join(dhcp_path, 'dnsmasq.pid')
+        command = 'sudo  ip netns exec ' + net_namespace + ' cat ' + pid_path
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+        # check if pid is runing
+        pid_status_path = content
+        if content:
+            command = "ps aux | awk '{print $2 }' | grep " + pid_status_path
+            print self.name, ': command:', command
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+        if not content:
+            command = 'sudo  ip netns exec ' + net_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
+              '--interface=' + interface + ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
+              ' --dhcp-range ' + dhcp_range + ' --pid-file=' + pid_file + ' --dhcp-leasefile=' + leases_path + '  --listen-address ' + ip_range[0]
+
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.readline()
+
+        if len(content) == 0:
+            return True
+        else:
+            return False
+
+    def delete_dhcp_interfaces(self, vlan):
+        """
+        Create a linux bridge with STP active
+        :param vlan: netowrk vlan id
+        :return:
+        """
+
+        if self.test:
+            return
+
+        net_namespace = 'ovim-' + vlan
+        command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + vlan
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' down'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip link set dev ovs-tap-' + vlan + ' down'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+    def create_dhcp_interfaces(self, vlan, ip, netmask):
+        """
+        Create a linux bridge with STP active
+        :param vlan: segmentation id
+        :param ip: Ip included in the dhcp range for the tap interface living in namesapce side
+        :param netmask: dhcp net CIDR
+        :return: True if success
+        """
+
+        if self.test:
+            return
+
+        net_namespace = 'ovim-' + vlan
+        namespace_interface = 'tap-' + vlan
+
+        command = 'sudo ip netns add ' + net_namespace
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip link add tap-' + vlan + ' type veth peer name ovs-tap-' + vlan
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + vlan + ' tag=' + vlan
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip link set tap-' + vlan + ' netns ' + net_namespace
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' up'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip link set dev ovs-tap-' + vlan + ' up'
+        print self.name, ': command:', command
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo  ip netns exec ' + net_namespace + ' ' + ' ifconfig  ' + namespace_interface \
+                  + ' ' + ip + ' netmask ' + netmask
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
         content = stdout.read()
@@ -1111,7 +1439,8 @@ class host_thread(threading.Thread):
                     continue
                 
                 self.db_lock.acquire()
-                result, content = self.db.get_table(FROM='images', SELECT=('path','metadata'),WHERE={'uuid':dev['image_id']} )
+                result, content = self.db.get_table(FROM='images', SELECT=('path', 'metadata'),
+                                                    WHERE={'uuid': dev['image_id']})
                 self.db_lock.release()
                 if result <= 0:
                     error_text = "ERROR", result, content, "when getting image", dev['image_id']
@@ -1591,8 +1920,8 @@ class host_thread(threading.Thread):
                 
             finally:
                 if conn is not None: conn.close()
-                            
-                              
+
+
 def create_server(server, db, db_lock, only_of_ports):
     #print "server"
     #print "server"
@@ -1859,9 +2188,10 @@ def create_server(server, db, db_lock, only_of_ports):
         control_iface['net_id']=control_iface.pop('uuid')
         #Get the brifge name
         db_lock.acquire()
-        result, content = db.get_table(FROM = 'nets',
-                                       SELECT = ('name','type', 'vlan', 'provider'),
-                                       WHERE = {'uuid':control_iface['net_id']})
+        result, content = db.get_table(FROM='nets',
+                                       SELECT=('name', 'type', 'vlan', 'provider', 'enable_dhcp',
+                                                 'dhcp_first_ip', 'dhcp_last_ip', 'cidr'),
+                                       WHERE={'uuid': control_iface['net_id']})
         db_lock.release()
         if result < 0: 
             pass
@@ -1879,6 +2209,12 @@ def create_server(server, db, db_lock, only_of_ports):
                     control_iface["type"] = "instance:bridge"
                 if network.get("vlan"):
                     control_iface["vlan"] = network["vlan"]
+
+                if network.get("enable_dhcp") == 'true':
+                    control_iface["enable_dhcp"] = network.get("enable_dhcp")
+                    control_iface["dhcp_first_ip"] = network["dhcp_first_ip"]
+                    control_iface["dhcp_last_ip"] = network["dhcp_last_ip"]
+                    control_iface["cidr"] = network["cidr"]
             else:
                 if network['type']!='data' and network['type']!='ptp':
                     return -1, "Error at field netwoks: network uuid %s for dataplane interface is not of type data or ptp" % control_iface['net_id']
