@@ -46,14 +46,27 @@
 # Changed the vlan tag used by virbrVIM from 2000 to 1100
 
 function usage(){
-    echo -e "Usage: sudo $0 [-y] <user-name>  [ <iface-name>  [<ip-address>|dhcp] ]"
+    echo -e "Usage: sudo $0 [-f] <user-name> [ <iface-for-overlay-bridges>  [<ip-address>|dhcp] ]"
     echo -e "  Configure compute host for VIM usage. (version 0.4). Params:"
-    echo -e "     -y  do not prompt for confirmation. If a new user is created, the user name is set as password"
+    echo -e "     -f  do not prompt for confirmation. If a new user is created, the user name is set as password"
     echo -e "     <user-name> Create if not exist and configure this user for openvim to connect"
-    echo -e "     <iface-name> if suplied creates bridge interfaces on this interface, needed for openvim"
+    echo -e "     <iface-for-overlay-bridges> if suplied creates bridge interfaces on this interface, needed for older openvim versions"
     echo -e "     ip or dhcp if suplied, configure the interface with this ip address (/24) or 'dhcp' "
+
 }
 
+function _install_openvswitch(){
+
+    echo "Installing openvswitch"
+    curl -O  http://openvswitch.org/releases/openvswitch-2.5.1.tar.gz
+    mkdir -p ~/rpmbuild/SOURCES
+    cp  openvswitch-2.5.1.tar.gz  ~/rpmbuild/SOURCES/
+    tar -zxvf openvswitch-2.5.1.tar.gz
+    cp -r openvswitch-2.5.1 ~/rpmbuild/SOURCES/
+    rpmbuild -bb --without check ~/rpmbuild/SOURCES/openvswitch-2.5.1/rhel/openvswitch.spec
+    yum -y localinstall /root/rpmbuild/RPMS/x86_64/openvswitch-2.5.1-1.x86_64.rpm
+    systemctl start openvswitch.service
+}
 
 #1 CHECK input parameters
 #1.1 root privileges
@@ -61,9 +74,9 @@ function usage(){
 
 #1.2 input parameters
 FORCE=""
-while getopts "y" o; do
+while getopts "f" o; do
     case "${o}" in
-        y)
+        f)
             FORCE="yes"
             ;;
         *)
@@ -85,12 +98,14 @@ user_name=$1
 interface=$2
 ip_iface=$3
 
+
 if [ -n "$interface" ] && ! ifconfig $interface &> /dev/null
 then
   echo "Error: interface '$interface' is not present in the system"
   usage
   exit 1
 fi
+
 
 echo '
 #################################################################
@@ -101,7 +116,12 @@ echo '
 yum repolist
 yum check-update
 yum update -y
-yum install -y screen virt-manager ethtool gcc gcc-c++ xorg-x11-xauth xorg-x11-xinit xorg-x11-deprecated-libs libXtst guestfish hwloc libhugetlbfs-utils libguestfs-tools numactl
+yum install -y screen virt-manager ethtool gcc gcc-c++ xorg-x11-xauth xorg-x11-xinit xorg-x11-deprecated-libs libXtst \
+                      guestfish hwloc libhugetlbfs-utils libguestfs-tools numactl
+
+
+# gcc make python-devel openssl-devel kernel-devel graphviz \ kernel-debug-devel autoconf automake rpm-build redhat-rpm-config \ libtool
+
 # Selinux management
 yum install -y policycoreutils-python
 
@@ -389,6 +409,8 @@ BOOTPROTO=none
 IPV6INIT=no" >> $interface.tmp
     mv $interface.tmp  ifcfg-$interface
 
+if  [ -z $interface ]
+then
   # Management interfaces
 #  integrated_interfaces=""
 #  nb_ifaces=0
@@ -458,7 +480,7 @@ BOOTPROTO=none
 MTU=9000
 BRIDGE=virbrMan$i" > ifcfg-${interface}.20$i2digits
   done
-
+fi
   iface=$interface
   if [ -n "$ip_iface" ]
   then
@@ -549,8 +571,9 @@ dracut --force
 #  chmod +x /etc/rc.d/rc.local
 
 #fi
+_install_openvswitch
 
-echo 
+echo
 echo "Do not forget to create a shared (NFS, Samba, ...) where original virtual machine images are allocated"
 echo
 echo "Do not forget to copy the public ssh key of openvim user into /home/${user_name}/.ssh/authorized_keys for authomatic login from openvim controller"
