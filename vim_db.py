@@ -173,7 +173,7 @@ class vim_db():
     def __get_used_net_vlan(self):
         #get used from database if needed
         try:
-            cmd = "SELECT vlan FROM nets WHERE vlan>='%s' and (type='ptp' or type='data') ORDER BY vlan LIMIT 25" % self.net_vlan_lastused
+            cmd = "SELECT vlan FROM nets WHERE vlan>='%s' ORDER BY vlan LIMIT 25" % self.net_vlan_lastused
             with self.con:
                 self.cur = self.con.cursor()
                 self.logger.debug(cmd)

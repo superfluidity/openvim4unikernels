@@ -1469,22 +1469,24 @@ def http_post_server_id(tenant_id):
             
         #look for dhcp ip address 
         r2, c2 = my.db.get_table(FROM="ports", SELECT=["mac", "net_id"], WHERE={"instance_id": new_instance})
-        if r2 >0 and config_dic.get("dhcp_server"):
+        if r2 >0:
             for iface in c2:
-                if iface["net_id"] in config_dic["dhcp_nets"]:
+                if config_dic.get("dhcp_server") and iface["net_id"] in config_dic["dhcp_nets"]:
                     #print "dhcp insert add task"
                     r,c = config_dic['dhcp_thread'].insert_task("add", iface["mac"])
                     if r < 0:
-                        print ':http_post_servers ERROR UPDATING dhcp_server !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c 
-        
-    #Start server
+                        print ':http_post_servers ERROR UPDATING dhcp_server !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c
+
+                #ensure compute contain the bridge for ovs networks:
+                server_net = get_network_id(iface['net_id'])
+                if server_net["network"].get('provider:physical', "")[:3] == 'OVS':
+                    vlan = str(server_net['network']['provider:vlan'])
+                    config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
+        #Start server
         
         server['uuid'] = new_instance
-        # server_start = server.get('start', 'yes')
-        if config_dic['network_type'] == 'ovs':
-            server_net = get_network_id(c2[0]['net_id'])
-            vlan = str(server_net['network']['provider:vlan'])
-            config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
+        server_start = server.get('start', 'yes')
+
         if server_start != 'no':
             server['paused'] = True if server_start == 'paused' else False 
             server['action'] = {"start":None}
@@ -1834,7 +1836,7 @@ def http_post_networks():
 #            if bridge_net==None:     
 #                bottle.abort(HTTP_Bad_Request, "invalid 'provider:physical', bridge '%s' is not one of the provisioned 'bridge_ifaces' in the configuration file" % bridge_net_name)
 #                return
-    elif config_dic['network_type'] == 'bridge' and net_type =='bridge_data' or net_type ==  'bridge_man' :
+    elif config_dic['network_type'] == 'bridge' and ( net_type =='bridge_data' or net_type ==  'bridge_man' ):
         #look for a free precreated nets
         for brnet in config_dic['bridge_nets']:
             if brnet[3]==None: # free
@@ -1860,7 +1862,7 @@ def http_post_networks():
         if net_vlan < 0:
             bottle.abort(HTTP_Internal_Server_Error, "Error getting an available vlan")
             return
-    if config_dic['network_type'] == 'ovs':
+    if net_provider == 'OVS':
         net_provider = 'OVS' + ":" + str(net_vlan)
 
     network['provider'] = net_provider
