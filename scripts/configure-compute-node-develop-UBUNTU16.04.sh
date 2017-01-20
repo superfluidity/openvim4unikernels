@@ -21,7 +21,7 @@
 # contact with: nfvlabs@tid.es
 ##
 
-# Authors: Antonio Lopez, Pablo Montes, Alfonso Tierno
+# Authors: Antonio Lopez, Pablo Montes, Alfonso Tierno, Leonardo Mirabal
 # June 2015
 
 # Personalize RHEL7.1 on compute nodes
@@ -46,26 +46,16 @@ set_mtu_path='/etc/'
 VLAN_INDEX=20
 
 function _usage(){
-    echo -e "Usage: sudo $0 [-y] <user-name>  <iface-name>"
+    echo -e "Usage: sudo $0 [-f] --user=<user-name> --overlay=ovs --iface-name=<iface-name>"
     echo -e "  Configure compute host for VIM usage. (version 0.4). OPTIONS:"
     echo -e "     -h --help    this help"
     echo -e "     -f --force:  do not prompt for confirmation. If a new user is created, the user name is set as password"
     echo -e "     -u --user:   Create if not exist and configure this user for openvim to connect"
-    echo -e "     --in --iface-name:  creates bridge interfaces on this interface, needed for openvim overlay networks"
+    echo -e "     -o --overlay: ovs, bridge and bridge-and-ovs. Specify the networking overlay used by openvim, by default ovs is used"
+    echo -e "     -in --iface-name:  creates bridge interfaces on this interface, needed for openvim overlay networks"
+
     exit 1
 }
-
-function _interface_cfg_generator(){
-    #$1 interface name | $2 MTU | $3 type
-
-echo "
-auto ${1}
-iface ${1} inet ${3}
-        mtu ${2}
-        ${bridge_ports}
-" >> ${interfaced_path}${1}."cfg"
-}
-
 
 function _interface_cfg_generator(){
     #$1 interface name | $2 vlan  | $3 virbrMan | $4  MTU
@@ -73,15 +63,14 @@ function _interface_cfg_generator(){
 echo "
 auto ${1}.${2}
 iface ${1}.${2} inet manual
-        mtu ${4}
-        post-up vconfig add ${1} ${2}
-        post-down vconfig rem ${1}.${2}
+        vlan-raw-device ${1}
+        post-up ip link set mtu $MTU dev ${1}.${2}
 
 auto ${3}
 iface ${3} inet manual
         bridge_ports ${1}.${2}
-        mtu ${4}
-        vlan-raw-device $1
+	    post-up ip link set dev ${3} && ip link set mtu $MTU dev ${3}
+
 " >> ${interfaced_path}${1}.${2}."cfg"
 }
 
@@ -89,14 +78,14 @@ function _install_user() {
     # create user given by the user and add to groups need it.
     # Add required groups
     groupadd -f admin
-    groupadd -f libvirt   #for other operating systems may be libvirtd
+    groupadd -f libvirtd   #for other operating systems may be libvirtd
 
     # Adds user, default password same as name
     if grep -q "^${option_user}:" /etc/passwd
     then
         #user exist, add to group
         echo "adding user ${option_user} to groups libvirt,admin"
-        usermod -a -G libvirt,admin -g admin ${option_user}
+        usermod -a -G libvirtd,admin -g admin ${option_user}
     else
         #create user if it does not exist
         [ -z "$FORCE" ] && read -p "user '${option_user}' does not exist, create (Y/n)" kk
@@ -105,7 +94,7 @@ function _install_user() {
             exit
         fi
         echo "creating and configuring user ${option_user}"
-        useradd -m -G libvirt,admin -g admin ${option_user}
+        useradd -m -G libvirtd,admin -g admin ${option_user}
         #Password
         if [ -z "$FORCE" ]
             then
@@ -139,13 +128,13 @@ function _openmano_img_2_libvirt_img(){
     fi
 }
 
-function _install_pacckags_dependences()
+function _install_packages_dependencies()
 {
     # Required packages by openvim
     apt-get -y update
     apt-get -y install  grub-common screen virt-manager ethtool build-essential \
                         x11-common x11-utils libguestfs-tools hwloc libguestfs-tools \
-                        numactl vlan nfs-common nfs-kernel-server
+                        numactl vlan nfs-common nfs-kernel-server  openvswitch-switch
     echo "Remove unneeded packages....."
     apt-get -y autoremove
 }
@@ -153,8 +142,6 @@ function _install_pacckags_dependences()
 function _network_configuration(){
     # adding vlan support
     grep -q '8021q' '/etc/modules'; [ $? -eq 1 ] && sudo su -c 'echo "8021q" >> /etc/modules'
-
-    #grep -q ${interface} '/etc/network/interfaces.d/50-cloud-init.cfg'; [ $? -eq 0 ] && sed -e '/'${interface}'/ s/^#*/#/' -i  '/etc/network/interfaces.d/50-cloud-init.cfg'
 
     # Network interfaces static configuration
     echo "Interface ==> $interface"
@@ -164,24 +151,25 @@ function _network_configuration(){
         rm -f /etc/udev/rules.d/pci_config.rules # it will be created to define VFs
         # Set ONBOOT=on and MTU=9000 on the interface used for the bridges
         echo "configuring iface $interface"
+    if [ "$option_overlay" == "bridge" ] || [ "$option_overlay" == "bridge-and-ovs" ]
+        then
+            # Static network interface configuration and MTU
+            MTU=9000
+            virbrMan_interface_number=20
 
-    # Static network interface configuration and MTU
-    MTU=9000
-    virbrMan_interface_number=20
-
-    #Create bridge interfaces
-    echo "Creating bridge ifaces: "
-    for ((i =1; i <= ${virbrMan_interface_number}; i++))
-        do
-            i2digits=${i}
-            [ ${i} -lt 10 ] && i2digits="0${i}"
-            echo "    ${interface} ${VLAN_INDEX}${i2digits}"
-            echo "    virbrMan${i}  vlan ${VLAN_INDEX}${i2digits}"
-            j=${i}
-            #$1 interface name | $2 vlan | $3 MTU | $3 virbrMan | $4 bridge_ports
-            _interface_cfg_generator  ${interface} ${VLAN_INDEX}${i2digits} 'virbrMan'${i} ${MTU}
-    done
-
+            #Create bridge interfaces
+            echo "Creating bridge ifaces: "
+            for ((i =1; i <= ${virbrMan_interface_number}; i++))
+                do
+                    i2digits=${i}
+                    [ ${i} -lt 10 ] && i2digits="0${i}"
+                    echo "    ${interface} ${VLAN_INDEX}${i2digits}"
+                    echo "    virbrMan${i}  vlan ${VLAN_INDEX}${i2digits}"
+                    j=${i}
+                    #$1 interface name | $2 vlan | $3 MTU | $3 virbrMan | $4 bridge_ports
+                    _interface_cfg_generator  ${interface} ${VLAN_INDEX}${i2digits} 'virbrMan'${i} ${MTU}
+            done
+        fi
     fi
 }
 
@@ -234,8 +222,30 @@ function _hostinfo_config()
     echo "#if compute node contain a different name it must be indicated in this file" >> /opt/VNF/images/hostinfo.yaml
     echo "#with the format extandard-name: compute-name" >> /opt/VNF/images/hostinfo.yaml
     chmod o+r /opt/VNF/images/hostinfo.yaml
+    if [ "$interface" != "" -a "$interface" != "em1" ]
+    then
+      echo "iface_names:"  >> /opt/VNF/images/hostinfo.yaml
+      echo "  em1: ${interface}" >> /opt/VNF/images/hostinfo.yaml
+    fi
 }
 
+function _add_user_to_visudo()
+{
+# Allow admin users to access without password
+if ! grep -q "#openmano" /etc/sudoers
+then
+    cat >> /home/${option_user}/script_visudo.sh << EOL
+#!/bin/bash
+echo "#openmano allow to group admin to grant root privileges without password" >> \$1
+echo "${option_user} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+EOL
+    chmod +x /home/${option_user}/script_visudo.sh
+    echo "allowing admin user to get root privileges withut password"
+    export EDITOR=/home/${option_user}/script_visudo.sh && sudo -E visudo
+    rm -f /home/${option_user}/script_visudo.sh
+fi
+
+}
 function _get_opts()
 {
     options="$1"
@@ -370,15 +380,19 @@ function _parse_opts()
     [ -n "$option_force" ] && FORCE="yes"
 
     [ -z "$option_user" ] && echo -e "ERROR: User argument is mandatory, --user=<user>\n" >&2 && _usage
-    #echo "user_name = "$option_user
 
     [ -z "$option_iface_name" ] && echo -e "ERROR: iface-name argument is mandatory, --iface-name=<interface>\n" && _usage
     interface=$option_iface_name
 
+    if [ "$option_overlay" != "bridge" ] && [ "$option_overlay" != "ovs" ] && [ "$option_overlay" != "bridge-and-ovs" ];
+    then
+        option_overlay='ovs'
+        echo 'ERROR: overlay argument must be "ovs", "bridge", "bridge-and-ovs"' && _usage
+    fi
 }
 
 #Parse opts
-_get_opts "help:h force:f user:u= iface-name:in= "  $*  || exit 1
+_get_opts "help:h force:f user:u= overlay:o= iface-name:in= "  $*  || exit 1
 _parse_opts
 
 #check root privileges
@@ -393,12 +407,12 @@ echo '
 #####       INSTALL USER                                    #####
 #################################################################'
 _install_user
-
+_add_user_to_visudo
 echo '
 #################################################################
 #####       INSTALL NEEDED PACKETS                          #####
 #################################################################'
-_install_pacckags_dependences
+_install_packages_dependencies
 
 echo '
 #################################################################
@@ -412,7 +426,10 @@ echo '
 #################################################################
 #####       NETWORK CONFIGURATION                           #####
 #################################################################'
+
 _network_configuration
+
+
 _disable_aaparmor
 _user_remainder_pront
 
