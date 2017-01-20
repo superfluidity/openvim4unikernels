@@ -195,7 +195,7 @@ then
     ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example3.yaml || ! echo "fail" >&2 || $_exit 1
 
     printf "%-50s" "Creating openvim tenant 'TEST-admin': "
-    result=`openvim tenant-create '{"tenant": {"name":"TEST-admin", "description":"admin"}}'`
+    result=`${DIRvim}/openvim tenant-create '{"tenant": {"name":"TEST-admin", "description":"admin"}}'`
     vimtenant=`echo $result |gawk '{print $1}'`
     #check a valid uuid is obtained
     ! is_valid_uuid $vimtenant && echo "FAIL" && echo "    $result" && $_exit 1
