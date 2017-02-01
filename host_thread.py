@@ -712,6 +712,8 @@ class host_thread(threading.Thread):
         Create a bridge in compute OVS to allocate VMs
         :return: True if success
         """
+        if self.test:
+            return
         command = 'sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true'
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -740,7 +742,7 @@ class host_thread(threading.Thread):
 
     def is_port_free(self, vlan, net_uuid):
         """
-        Check if por is free before delete from the compute.
+        Check if there not ovs ports of a network in a compute host.
         :param vlan: vlan port id
         :param net_uuid: network id
         :return: True if is not free
@@ -748,7 +750,7 @@ class host_thread(threading.Thread):
         self.db_lock.acquire()
         result, content = self.db.get_table(
             FROM='ports as p join instances as i on p.instance_id=i.uuid',
-            WHERE={"i.host_id":  self.host_id, 'p.type': 'instance:bridge', 'p.net_id':  net_uuid}
+            WHERE={"i.host_id":  self.host_id, 'p.type': 'instance:ovs', 'p.net_id':  net_uuid}
         )
         self.db_lock.release()
 
@@ -779,6 +781,8 @@ class host_thread(threading.Thread):
         :param net_uuid:
         :return: True if success
         """
+        if self.test:
+            return
         if not self.is_port_free(vlan, net_uuid):
             return True
         self.delete_port_to_ovs_bridge(vlan, net_uuid)
@@ -806,6 +810,8 @@ class host_thread(threading.Thread):
         :param vlan: vlan port id
         :return:
         """
+        if self.test:
+            return
         self.create_linux_bridge(vlan)
         self.add_port_to_ovs_bridge(vlan)
 
@@ -840,6 +846,8 @@ class host_thread(threading.Thread):
         :param remote_ip: tunnel endpoint remote compute ip.
         :return:
         """
+        if self.test:
+            return
         command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
                   ' -- set Interface ' + vxlan_interface + '  type=vxlan options:remote_ip=' + remote_ip + \
                   ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10'
@@ -858,6 +866,8 @@ class host_thread(threading.Thread):
         :param vxlan_interface: vlxan name to be delete it.
         :return: True if success.
         """
+        if self.test:
+            return
         command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -873,6 +883,8 @@ class host_thread(threading.Thread):
         Delete a OVS bridge from  a compute.
         :return: True if success
         """
+        if self.test:
+            return
         command = 'sudo ovs-vsctl del-br br-int'
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -1847,7 +1859,9 @@ def create_server(server, db, db_lock, only_of_ports):
         control_iface['net_id']=control_iface.pop('uuid')
         #Get the brifge name
         db_lock.acquire()
-        result, content = db.get_table(FROM='nets', SELECT=('name','type', 'vlan'),WHERE={'uuid':control_iface['net_id']} )
+        result, content = db.get_table(FROM = 'nets',
+                                       SELECT = ('name','type', 'vlan', 'provider'),
+                                       WHERE = {'uuid':control_iface['net_id']})
         db_lock.release()
         if result < 0: 
             pass
@@ -1859,6 +1873,12 @@ def create_server(server, db, db_lock, only_of_ports):
                 if network['type']!='bridge_data' and network['type']!='bridge_man':
                     return -1, "Error at field netwoks: network uuid %s for control interface is not of type bridge_man or bridge_data" % control_iface['net_id']
                 resources['bridged-ifaces'].append(control_iface)
+                if network.get("provider") and network["provider"][0:3] == "OVS":
+                    control_iface["type"] = "instance:ovs"
+                else:
+                    control_iface["type"] = "instance:bridge"
+                if network.get("vlan"):
+                    control_iface["vlan"] = network["vlan"]
             else:
                 if network['type']!='data' and network['type']!='ptp':
                     return -1, "Error at field netwoks: network uuid %s for dataplane interface is not of type data or ptp" % control_iface['net_id']

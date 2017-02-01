@@ -1027,15 +1027,16 @@ class vim_db():
                 with self.con:
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)
                     #get INSTANCE
-                    cmd = "SELECT uuid, name, description, progress, host_id, flavor_id, image_id, status, last_error, tenant_id, ram, vcpus, created_at \
-                        FROM instances WHERE uuid = '" +  str(instance_id) +"'"
+                    cmd = "SELECT uuid, name, description, progress, host_id, flavor_id, image_id, status, last_error, "\
+                        "tenant_id, ram, vcpus, created_at FROM instances WHERE uuid='{}'".format(instance_id)
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)
                     if self.cur.rowcount == 0 : return 0, "instance '" + str(instance_id) +"'not found."
                     instance = self.cur.fetchone()
                     #get networks
-                    cmd = "SELECT uuid as iface_id, net_id, mac as mac_address, ip_address, name, Mbps as bandwidth, vpci, model \
-                        FROM ports WHERE type = 'instance:bridge' AND instance_id = '" + instance_id + "'"
+                    cmd = "SELECT uuid as iface_id, net_id, mac as mac_address, ip_address, name, Mbps as bandwidth, "\
+                        "vpci, model FROM ports WHERE (type='instance:bridge' or type='instance:ovs') AND "\
+                        "instance_id= '{}'".format(instance_id)
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)
                     if self.cur.rowcount > 0 :
@@ -1105,8 +1106,9 @@ class vim_db():
                                 numa_dict['threads-source'] = thread_source
 
                         #get dedicated ports and SRIOV
-                        cmd = "SELECT port_id as iface_id, p.vlan as vlan, p.mac as mac_address, net_id, if(model='PF','yes',if(model='VF','no','yes:sriov')) as dedicated,\
-                            rp.Mbps as bandwidth, name, vpci, pci as source \
+                        cmd = "SELECT port_id as iface_id, p.vlan as vlan, p.mac as mac_address, net_id, if(model='PF',\
+                            'yes',if(model='VF','no','yes:sriov')) as dedicated, rp.Mbps as bandwidth, name, vpci, \
+                            pci as source \
                             FROM resources_port as rp join ports as p on port_id=uuid  WHERE p.instance_id = '%s' AND numa_id = '%s' and p.type='instance:data'" % (instance_id, numa_id) 
                         self.logger.debug(cmd)
                         self.cur.execute(cmd)
@@ -1395,7 +1397,7 @@ class vim_db():
                         self.cur.execute(cmd)
                         #insert iface
                         iface['instance_id'] = uuid
-                        iface['type'] = 'instance:bridge'
+                        # iface['type'] = 'instance:bridge'
                         if 'name' not in iface: iface['name']="br"+str(nb_bridge_ifaces)
                         iface['Mbps']=iface.pop('bandwidth', None)
                         if 'mac_address' not in iface:
@@ -1518,13 +1520,11 @@ class vim_db():
                         net_dataplane_list.append(net[0])
 
                     # get ovs manangement nets
-                    cmd = "SELECT DISTINCT net_id from ports WHERE instance_id = " \
-                          "'%s' AND net_id is not Null AND type='instance:bridge'" % instance_id
+                    cmd = "SELECT DISTINCT net_id, vlan FROM ports WHERE instance_id='{}' AND net_id is not Null AND "\
+                            "type='instance:ovs'".format(instance_id)
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)
-                    net_list__ = self.cur.fetchall()
-                    for net in net_list__:
-                        net_ovs_list.append(net[0])
+                    net_ovs_list += self.cur.fetchall()
 
                     #get dataplane interfaces releases by this VM; both PF and VF with no other VF 
                     cmd="SELECT source_name, mac FROM (SELECT root_id, count(instance_id) as used FROM resources_port WHERE instance_id='%s' GROUP BY root_id ) AS A" % instance_id \
@@ -1635,8 +1635,8 @@ class vim_db():
             if net['tenant_id']==tenant_id and net['shared']=='false':
                 return -1, "needed admin privileges to attach to the net %s" % net_id
         #check types
-        if (net['type'] in ('p2p','data') and 'port_type' == 'instance:bridge') or \
-            (net['type'] in ('bridge_data','bridge_man') and 'port_type' != 'instance:bridge') :
+        if (net['type'] in ('p2p','data') and port_type != 'instance:data') or \
+            (net['type'] in ('bridge_data','bridge_man') and port_type not in ('instance:bridge', 'instance:ovs')):
             return -1, "can not attach a port of type %s into a net of type %s" % (port_type, net['type'])
         if net['type'] == 'ptp':
             #look how many 

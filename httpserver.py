@@ -1648,12 +1648,11 @@ def http_server_action(server_id, tenant_id, action):
                     #print "dhcp insert del task"
                     if r < 0:
                         print ':http_post_servers ERROR UPDATING dhcp_server !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c 
-        if config_dic['network_type'] == 'ovs':
-            # delete ovs-port and linux bridge
-            for net in net_ovs_list:
-                server_net = get_network_id(net)
-                vlan = str(server_net['network']['provider:vlan'])
-                config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, server_net['network']['id'])
+        # delete ovs-port and linux bridge, contains a list of tuple (net_id,vlan)
+        for net in net_ovs_list:
+            vlan = str(net[1])
+            net_id = net[0]
+            config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, net_id)
     return format_out(data)
 
 
@@ -2206,7 +2205,7 @@ def http_put_port_id(port_id):
             
             if new_net is not None: nets.append(new_net) #put first the new net, so that new openflow rules are created before removing the old ones 
             if old_net is not None: nets.append(old_net)
-            if port['type'] == 'instance:bridge':
+            if port['type'] == 'instance:bridge' or port['type'] == 'instance:ovs':
                 bottle.abort(HTTP_Forbidden, "bridge interfaces cannot be attached to a different net")
                 return
             elif port['type'] == 'external':

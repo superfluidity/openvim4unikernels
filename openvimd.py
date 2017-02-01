@@ -30,9 +30,9 @@ and host controllers
 
 __author__="Alfonso Tierno"
 __date__ ="$10-jul-2014 12:07:15$"
-__version__="0.5.1-r518"
+__version__="0.5.2-r519"
 version_date="Jan 2017"
-database_version="0.8"      #expected database schema version
+database_version="0.9"      #expected database schema version
 
 import httpserver
 import auxiliary_functions as af

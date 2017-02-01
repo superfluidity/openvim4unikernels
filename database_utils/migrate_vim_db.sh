@@ -175,7 +175,8 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 4001 ] && DATABASE_TARGET_VER_NUM=5   #0.4.1   =>  5
 [ $OPENVIM_VER_NUM -ge 4002 ] && DATABASE_TARGET_VER_NUM=6   #0.4.2   =>  6
 [ $OPENVIM_VER_NUM -ge 4005 ] && DATABASE_TARGET_VER_NUM=7   #0.4.5   =>  7
-[ $OPENVIM_VER_NUM -ge 4010 ] && DATABASE_TARGET_VER_NUM=8   #0.4.10   =>  8
+[ $OPENVIM_VER_NUM -ge 4010 ] && DATABASE_TARGET_VER_NUM=8   #0.4.10  =>  8
+[ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=9   #0.5.2   =>  9
 #TODO ... put next versions here
 
 
@@ -452,6 +453,18 @@ function downgrade_from_8(){
     echo "DELETE FROM schema_version WHERE version_int = '8';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
+function upgrade_to_9(){
+    echo "    upgrade database from version 0.8 to version 0.9"
+    echo "     change types at 'ports'"
+    echo "ALTER TABLE ports CHANGE COLUMN type type ENUM('instance:bridge','instance:data','external','instance:ovs','controller:ovs') NOT NULL DEFAULT 'instance:bridge' AFTER status;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (9, '0.9', '0.5.2', 'add column checksum to images', '2016-09-30');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+function downgrade_from_9(){
+    echo "    downgrade database from version 0.9 to version 0.8"
+    echo "     change back types at 'ports'"
+    echo "ALTER TABLE ports CHANGE COLUMN type type ENUM('instance:bridge','instance:data','external') NOT NULL DEFAULT 'instance:bridge' AFTER status;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '9';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
 #TODO ... put funtions here
 
 
