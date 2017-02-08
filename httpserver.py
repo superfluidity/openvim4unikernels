@@ -26,8 +26,8 @@ This is the thread for the http server North API.
 Two thread will be launched, with normal and administrative permissions.
 '''
 
-__author__ = "Alfonso Tierno, Leonardo Mirabal"
-__date__ = "$10-jul-2014 12:07:15$"
+__author__="Alfonso Tierno, Gerardo Garcia, Leonardo Mirabal"
+__date__ ="$10-jul-2014 12:07:15$"
 
 import bottle
 import urlparse
@@ -73,6 +73,11 @@ def md5(fname):
     with open(fname, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+def md5_string(fname):
+    hash_md5 = hashlib.md5()
+    hash_md5.update(fname)
     return hash_md5.hexdigest()
 
 def check_extended(extended, allow_net_attach=False):
@@ -1238,13 +1243,14 @@ def http_get_images(tenant_id):
         bottle.abort(result, content)
     #obtain data
     select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_image,
-            ('id','name','description','path','public') )
+            ('id','name','checksum','description','path','public') )
     if tenant_id=='any':
         from_  ='images'
+        where_or_ = None
     else:
-        from_  ='tenants_images inner join images on tenants_images.image_id=images.uuid'
-        where_['tenant_id'] = tenant_id
-    result, content = my.db.get_table(SELECT=select_, FROM=from_, WHERE=where_, LIMIT=limit_)
+        from_  ='tenants_images right join images on tenants_images.image_id=images.uuid'
+        where_or_ = {'tenant_id': tenant_id, 'public': 'yes'}
+    result, content = my.db.get_table(SELECT=select_, DISTINCT=True, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND", LIMIT=limit_)
     if result < 0:
         print "http_get_images Error", content
         bottle.abort(-result, content)
@@ -1263,14 +1269,15 @@ def http_get_image_id(tenant_id, image_id):
         bottle.abort(result, content)
     #obtain data
     select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_image,
-            ('id','name','description','progress', 'status','path', 'created', 'updated','public') )
+            ('id','name','checksum','description','progress', 'status','path', 'created', 'updated','public') )
     if tenant_id=='any':
         from_  ='images'
+        where_or_ = None
     else:
-        from_  ='tenants_images as ti inner join images as i on ti.image_id=i.uuid'
-        where_['tenant_id'] = tenant_id
+        from_  ='tenants_images as ti right join images as i on ti.image_id=i.uuid'
+        where_or_ = {'tenant_id': tenant_id, 'public': "yes"}
     where_['uuid'] = image_id
-    result, content = my.db.get_table(SELECT=select_, FROM=from_, WHERE=where_, LIMIT=limit_)
+    result, content = my.db.get_table(SELECT=select_, DISTINCT=True, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND", LIMIT=limit_)
 
     if result < 0:
         print "http_get_images error %d %s" % (result, content)
@@ -1305,15 +1312,26 @@ def http_post_images(tenant_id):
     if metadata_dict is not None: 
         http_content['image']['metadata'] = json.dumps(metadata_dict)
     #calculate checksum
-    host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
     try:
         image_file = http_content['image'].get('path',None)
-        if os.path.exists(image_file):
-            http_content['image']['checksum'] = md5(image_file)
-        elif is_url(image_file):
-            pass
+        parsed_url = urlparse.urlparse(image_file)
+        if parsed_url.scheme == "" and parsed_url.netloc == "":
+            # The path is a local file
+            if os.path.exists(image_file):
+                http_content['image']['checksum'] = md5(image_file)
         else:
-            if not host_test_mode:
+            # The path is a URL. Code should be added to download the image and calculate the checksum
+            #http_content['image']['checksum'] = md5(downloaded_image)
+            pass
+        # Finally, only if we are in test mode and checksum has not been calculated, we calculate it from the path
+        host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
+        if host_test_mode:
+            if 'checksum' not in http_content['image']:
+                http_content['image']['checksum'] = md5_string(image_file)
+        else:
+            # At this point, if the path is a local file and no chechsum has been obtained yet, an error is sent back.
+            # If it is a URL, no error is sent. Checksum will be an empty string
+            if parsed_url.scheme == "" and parsed_url.netloc == "" and 'checksum' not in http_content['image']:
                 content = "Image file not found"
                 print "http_post_images error: %d %s" % (HTTP_Bad_Request, content)
                 bottle.abort(HTTP_Bad_Request, content)
@@ -1424,10 +1442,11 @@ def http_put_image_id(tenant_id, image_id):
     where_={'uuid': image_id}
     if tenant_id=='any':
         from_  ='images'
+        where_or_ = None
     else:
-        from_  ='tenants_images as ti inner join images as i on ti.image_id=i.uuid'
-        where_['tenant_id'] = tenant_id
-    result, content = my.db.get_table(SELECT=('public',), FROM=from_, WHERE=where_)
+        from_  ='tenants_images as ti right join images as i on ti.image_id=i.uuid'
+        where_or_ = {'tenant_id': tenant_id, 'public': 'yes'}
+    result, content = my.db.get_table(SELECT=('public',), DISTINCT=True, FROM=from_, WHERE=where_, WHERE_OR=where_or_, WHERE_AND_OR="AND")
     if result==0:
         text_error="Image '%s' not found" % image_id
         if tenant_id!='any':
@@ -1555,12 +1574,25 @@ def http_post_server_id(tenant_id):
         return
     server['flavor']=content[0]
     #check image valid and take info
-    result, content = my.db.get_table(FROM='tenants_images as ti join images as i on ti.image_id=i.uuid',
-        SELECT=('path','metadata'), WHERE={'uuid':server['image_id'], 'tenant_id':tenant_id, "status":"ACTIVE"})
+    result, content = my.db.get_table(FROM='tenants_images as ti right join images as i on ti.image_id=i.uuid',
+                                      SELECT=('path', 'metadata', 'image_id'),
+                                      WHERE={'uuid':server['image_id'], "status":"ACTIVE"},
+                                      WHERE_OR={'tenant_id':tenant_id, 'public': 'yes'},
+                                      WHERE_AND_OR="AND",
+                                      DISTINCT=True)
     if result<=0:
         bottle.abort(HTTP_Not_Found, 'image_id %s not found or not ACTIVE' % server['image_id'])
         return
-    server['image']=content[0]
+    for image_dict in content:
+        if image_dict.get("image_id"):
+            break
+    else:
+        # insert in data base tenants_images
+        r2, c2 = my.db.new_row('tenants_images', {'image_id': server['image_id'], 'tenant_id': tenant_id})
+        if r2<=0:
+            bottle.abort(HTTP_Not_Found, 'image_id %s cannot be used. Error %s' % (server['image_id'], c2))
+            return
+    server['image']={"path": content[0]["path"], "metadata": content[0]["metadata"]}
     if "hosts_id" in server:
         result, content = my.db.get_table(FROM='hosts', SELECT=('uuid',), WHERE={'uuid': server['host_id']})
         if result<=0:
@@ -1717,8 +1749,9 @@ def http_server_action(server_id, tenant_id, action):
                 else: #result==1
                     image_id = content[0]['image_id']    
                 
-        result, content = my.db.get_table(FROM='tenants_images as ti join images as i on ti.image_id=i.uuid',
-            SELECT=('path','metadata'), WHERE={'uuid':image_id, 'tenant_id':tenant_id, "status":"ACTIVE"})
+        result, content = my.db.get_table(FROM='tenants_images as ti right join images as i on ti.image_id=i.uuid',
+            SELECT=('path','metadata'), WHERE={'uuid':image_id, "status":"ACTIVE"},
+            WHERE_OR={'tenant_id':tenant_id, 'public': 'yes'}, WHERE_AND_OR="AND", DISTINCT=True)
         if result<=0:
             bottle.abort(HTTP_Not_Found, 'image_id %s not found or not ACTIVE' % image_id)
             return
@@ -1911,7 +1944,6 @@ def http_post_networks():
     #check valid params
     net_provider = network.get('provider')
     net_type =     network.get('type')
-    net_type = network.get('type')
     net_enable_dhcp = network.get('enable_dhcp')
     if net_enable_dhcp:
         net_cidr = network.get('cidr')
@@ -1976,7 +2008,8 @@ def http_post_networks():
         net_type='bridge_man' 
         
     if net_provider != None:
-        if net_provider[:7] == 'bridge:':
+        if net_provider[:7]=='bridge:':
+            #check it is one of the pre-provisioned bridges
             bridge_net_name = net_provider[7:]
             for brnet in config_dic['bridge_nets']:
                 if brnet[0]==bridge_net_name: # free
@@ -2459,4 +2492,3 @@ def http_delete_port_id(port_id):
         bottle.abort(-result, content)
     return
     
-

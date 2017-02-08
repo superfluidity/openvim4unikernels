@@ -41,15 +41,13 @@ from vim_schema import localinfo_schema, hostinfo_schema
 import random
 import os
 
+#TODO: insert a logging system
 
 # from logging import Logger
 # import auxiliary_functions as af
 
 # TODO: insert a logging system
 
-
-# global lvirt_module
-# lvirt_module=None  #libvirt module is charged only if not in test mode
 
 class host_thread(threading.Thread):
     lvirt_module = None
