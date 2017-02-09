@@ -48,6 +48,8 @@ from vim_schema import host_new_schema, host_edit_schema, tenant_new_schema, \
     image_new_schema, image_update_schema, \
     server_new_schema, server_action_schema, network_new_schema, network_update_schema, \
     port_new_schema, port_update_schema
+import ovim
+import logging
 
 global my
 global url_base
@@ -186,7 +188,7 @@ def delete_nulls(var):
 
 
 class httpserver(threading.Thread):
-    def __init__(self, db_conn, name="http", host='localhost', port=8080, admin=False, config_=None):
+    def __init__(self, ovim, name="http", host='localhost', port=8080, admin=False, config_=None):
         '''
         Creates a new thread to attend the http connections
         Attributes:
@@ -208,7 +210,8 @@ class httpserver(threading.Thread):
         threading.Thread.__init__(self)
         self.host = host
         self.port = port  
-        self.db = db_conn
+        self.db = ovim.db  #TODO OVIM remove
+        self.ovim = ovim
         self.admin = admin
         if name in config_dic:
             print "httpserver Warning!!! Onether thread with the same name", name
@@ -223,6 +226,7 @@ class httpserver(threading.Thread):
         #Ensure that when the main program exits the thread will also exit
         self.daemon = True      
         self.setDaemon(True)
+        self.logger = logging.getLogger("openvim.http")
          
     def run(self):
         bottle.run(host=self.host, port=self.port, debug=True) #quiet=True
@@ -337,40 +341,41 @@ def filter_query_string(qs, http2db, allowed):
         limit: limit dictated by user with the query string 'limit'. 100 by default
     abort if not permitted, using bottel.abort
     '''
-    where={}
-    limit=100
-    select=[]
+    where = {}
+    limit = 100
+    select = []
     if type(qs) is not bottle.FormsDict:
         print '!!!!!!!!!!!!!!invalid query string not a dictionary'
-        #bottle.abort(HTTP_Internal_Server_Error, "call programmer")
+        # bottle.abort(HTTP_Internal_Server_Error, "call programmer")
     else:
         for k in qs:
-            if k=='field':
+            if k == 'field':
                 select += qs.getall(k)
                 for v in select:
                     if v not in allowed:
-                        bottle.abort(HTTP_Bad_Request, "Invalid query string at 'field="+v+"'")
-            elif k=='limit':
+                        bottle.abort(HTTP_Bad_Request, "Invalid query string at 'field=" + v + "'")
+            elif k == 'limit':
                 try:
-                    limit=int(qs[k])
+                    limit = int(qs[k])
                 except:
-                    bottle.abort(HTTP_Bad_Request, "Invalid query string at 'limit="+qs[k]+"'")
+                    bottle.abort(HTTP_Bad_Request, "Invalid query string at 'limit=" + qs[k] + "'")
             else:
                 if k not in allowed:
-                    bottle.abort(HTTP_Bad_Request, "Invalid query string at '"+k+"="+qs[k]+"'")
-                if qs[k]!="null":  where[k]=qs[k]
-                else: where[k]=None 
-    if len(select)==0: select += allowed
-    #change from http api to database naming
-    for i in range(0,len(select)):
-        k=select[i]
-        if k in http2db: 
+                    bottle.abort(HTTP_Bad_Request, "Invalid query string at '" + k + "=" + qs[k] + "'")
+                if qs[k] != "null":
+                    where[k] = qs[k]
+                else:
+                    where[k] = None
+    if len(select) == 0: select += allowed
+    # change from http api to database naming
+    for i in range(0, len(select)):
+        k = select[i]
+        if k in http2db:
             select[i] = http2db[k]
     change_keys_http2db(where, http2db)
-    #print "filter_query_string", select,where,limit
-    
-    return select,where,limit
+    # print "filter_query_string", select,where,limit
 
+    return select, where, limit
 
 def convert_bandwidth(data, reverse=False):
     '''Check the field bandwidth recursively and when found, it removes units and convert to number 
@@ -406,7 +411,7 @@ def convert_bandwidth(data, reverse=False):
             if type(k) is dict or type(k) is tuple or type(k) is list:
                 convert_bandwidth(k, reverse)
 
-def convert_boolean(data, items):
+def convert_boolean(data, items): #TODO OVIM delete
     '''Check recursively the content of data, and if there is an key contained in items, convert value from string to boolean 
     It assumes that bandwidth is well formed
     Attributes:
@@ -2305,37 +2310,37 @@ def http_get_ports():
     select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_port,
             ('id','name','tenant_id','network_id','vpci','mac_address','device_owner','device_id',
              'binding:switch_port','binding:vlan','bandwidth','status','admin_state_up','ip_address') )
-    #result, content = my.db.get_ports(where_)
-    result, content = my.db.get_table(SELECT=select_, WHERE=where_, FROM='ports',LIMIT=limit_)
-    if result < 0:
-        print "http_get_ports Error", result, content
-        bottle.abort(-result, content)
-        return
-    else:
-        convert_boolean(content, ('admin_state_up',) )
-        delete_nulls(content)      
-        change_keys_http2db(content, http2db_port, reverse=True)
-        data={'ports' : content}
+    try:
+        ports = my.ovim.get_ports(columns=select_, filter=where_, limit=limit_)
+        delete_nulls(ports)
+        change_keys_http2db(ports, http2db_port, reverse=True)
+        data={'ports' : ports}
         return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
 @bottle.route(url_base + '/ports/<port_id>', method='GET')
 def http_get_port_id(port_id):
     my = config_dic['http_threads'][ threading.current_thread().name ]
-    #obtain data
-    result, content = my.db.get_table(WHERE={'uuid': port_id}, FROM='ports')
-    if result < 0:
-        print "http_get_ports error", result, content
-        bottle.abort(-result, content)
-    elif result==0:
-        print "http_get_ports port '%s' not found" % str(port_id)
-        bottle.abort(HTTP_Not_Found, 'port %s not found' % port_id)
-    else:
-        convert_boolean(content, ('admin_state_up',) )
-        delete_nulls(content)      
-        change_keys_http2db(content, http2db_port, reverse=True)
-        data={'port' : content[0]}
+    try:
+        ports = my.ovim.get_ports(filter={"uuid": port_id})
+        if not ports:
+            bottle.abort(HTTP_Not_Found, 'port %s not found' % port_id)
+            return
+        delete_nulls(ports)
+        change_keys_http2db(ports, http2db_port, reverse=True)
+        data = {'port': ports[0]}
         return format_out(data)
-    
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
 @bottle.route(url_base + '/ports', method='POST')
 def http_post_ports():
@@ -2349,115 +2354,54 @@ def http_post_ports():
     if r is not None: print "http_post_ports: Warning: remove extra items ", r
     change_keys_http2db(http_content['port'], http2db_port)
     port=http_content['port']
-
-    port['type'] = 'external'
-    if 'net_id' in port and port['net_id'] == None:
-        del port['net_id']
-
-    if 'net_id' in port:
-        #check that new net has the correct type
-        result, new_net = my.db.check_target_net(port['net_id'], None, 'external' )
-        if result < 0:
-            bottle.abort(HTTP_Bad_Request, new_net)
+    try:
+        port_id = my.ovim.new_port(port)
+        ports = my.ovim.get_ports(filter={"uuid": port_id})
+        if not ports:
+            bottle.abort(HTTP_Internal_Server_Error, "port '{}' inserted but not found at database".format(port_id))
             return
-    #insert in data base
-    result, uuid = my.db.new_row('ports', port, True, True)
-    if result > 0:
-        if 'net_id' in port: 
-            r,c = config_dic['of_thread'].insert_task("update-net", port['net_id'])
-            if r < 0:
-                print "http_post_ports error while launching openflow rules"
-                bottle.abort(HTTP_Internal_Server_Error, c)
-        return http_get_port_id(uuid)
-    else:
-        bottle.abort(-result, uuid)
-        return
-    
+        delete_nulls(ports)
+        change_keys_http2db(ports, http2db_port, reverse=True)
+        data = {'port': ports[0]}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
 @bottle.route(url_base + '/ports/<port_id>', method='PUT')
 def http_put_port_id(port_id):
     '''update a port_id into the database.'''
-
     my = config_dic['http_threads'][ threading.current_thread().name ]
     #parse input data
     http_content = format_in( port_update_schema )
     change_keys_http2db(http_content['port'], http2db_port)
     port_dict=http_content['port']
 
-    #Look for the previous port data
-    where_ = {'uuid': port_id}
-    result, content = my.db.get_table(FROM="ports",WHERE=where_)
-    if result < 0:
-        print "http_put_port_id error", result, content
-        bottle.abort(-result, content)
-        return
-    elif result==0:
-        print "http_put_port_id port '%s' not found" % port_id
-        bottle.abort(HTTP_Not_Found, 'port %s not found' % port_id)
-        return
-    print port_dict
-    for k in ('vlan','switch_port','mac_address', 'tenant_id'):
+    for k in ('vlan', 'switch_port', 'mac_address', 'tenant_id'):
         if k in port_dict and not my.admin:
             bottle.abort(HTTP_Unauthorized, "Needed admin privileges for changing " + k)
             return
-    
-    port=content[0]
-    #change_keys_http2db(port, http2db_port, reverse=True)
-    nets = []
-    host_id = None
-    result=1
-    if 'net_id' in port_dict:
-        #change of net. 
-        old_net = port.get('net_id', None)
-        new_net = port_dict['net_id']
-        if old_net != new_net:
-            
-            if new_net is not None: nets.append(new_net) #put first the new net, so that new openflow rules are created before removing the old ones 
-            if old_net is not None: nets.append(old_net)
-            if port['type'] == 'instance:bridge' or port['type'] == 'instance:ovs':
-                bottle.abort(HTTP_Forbidden, "bridge interfaces cannot be attached to a different net")
-                return
-            elif port['type'] == 'external':
-                if not my.admin:
-                    bottle.abort(HTTP_Unauthorized, "Needed admin privileges")
-                    return
-            else:
-                if new_net != None:
-                    #check that new net has the correct type
-                    result, new_net_dict = my.db.check_target_net(new_net, None, port['type'] )
-                
-                #change VLAN for SR-IOV ports
-                if result>=0 and port["type"]=="instance:data" and port["model"]=="VF": #TODO consider also VFnotShared
-                    if new_net == None:
-                        port_dict["vlan"] = None
-                    else:
-                        port_dict["vlan"] = new_net_dict["vlan"]
-                    #get host where this VM is allocated
-                    result, content = my.db.get_table(FROM="instances",WHERE={"uuid":port["instance_id"]})
-                    if result<0:
-                        print "http_put_port_id database error", content
-                    elif result>0:
-                        host_id = content[0]["host_id"]
-    
-    #insert in data base
-    if result >= 0:
-        result, content = my.db.update_rows('ports', port_dict, WHERE={'uuid': port_id}, log=False )
-        
-    #Insert task to complete actions
-    if result > 0: 
-        for net_id in nets:
-            r,v = config_dic['of_thread'].insert_task("update-net", net_id)
-            if r<0: print "Error *********   http_put_port_id  update_of_flows: ", v
-            #TODO Do something if fails
-        if host_id != None:
-            config_dic['host_threads'][host_id].insert_task("edit-iface", port_id, old_net, new_net)
-    
-    if result >= 0:
-        return http_get_port_id(port_id)
-    else:
-        bottle.abort(HTTP_Bad_Request, content)
-        return
+    try:
+        port_id = my.ovim.edit_port(port_id, port_dict, my.admin)
+        ports = my.ovim.get_ports(filter={"uuid": port_id})
+        if not ports:
+            bottle.abort(HTTP_Internal_Server_Error, "port '{}' edited but not found at database".format(port_id))
+            return
+        delete_nulls(ports)
+        change_keys_http2db(ports, http2db_port, reverse=True)
+        data = {'port': ports[0]}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
-  
+
 @bottle.route(url_base + '/ports/<port_id>', method='DELETE')
 def http_delete_port_id(port_id):
     '''delete a port_id from the database.'''
@@ -2465,30 +2409,15 @@ def http_delete_port_id(port_id):
     if not my.admin:
         bottle.abort(HTTP_Unauthorized, "Needed admin privileges")
         return
-
-    #Look for the previous port data
-    where_ = {'uuid': port_id, "type": "external"}
-    result, ports = my.db.get_table(WHERE=where_, FROM='ports',LIMIT=100)
-    
-    if result<=0:
-        print "http_delete_port_id port '%s' not found" % port_id
-        bottle.abort(HTTP_Not_Found, 'port %s not found or device_owner is not external' % port_id)
-        return
-    #delete from the data base
-    result, content = my.db.delete_row('ports', port_id )
-
-    if result == 0:
-        bottle.abort(HTTP_Not_Found, content)
-    elif result >0:
-        network = ports[0].get('net_id', None)
-        if network is not None:
-            #change of net. 
-            r,c = config_dic['of_thread'].insert_task("update-net", network)
-            if r<0: print "!!!!!! http_delete_port_id update_of_flows error", r, c 
-        data={'result' : content}
+    try:
+        result = my.ovim.delete_port(port_id)
+        data = {'result': result}
         return format_out(data)
-    else:
-        print "http_delete_port_id error",result, content
-        bottle.abort(-result, content)
-    return
-    
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+

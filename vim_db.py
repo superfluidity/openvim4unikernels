@@ -226,7 +226,7 @@ class vim_db():
         select_ = "SELECT "
         if sql_dict.get("DISTINCT"):
             select_ += "DISTINCT "
-        select_ += ("*" if 'SELECT' not in sql_dict else ",".join(map(str,sql_dict['SELECT'])) )
+        select_ += ("*" if not sql_dict.get('SELECT') else ",".join(map(str,sql_dict['SELECT'])) )
         #print 'select_', select_
         from_  = "FROM " + str(sql_dict['FROM'])
         #print 'from_', from_
@@ -259,7 +259,7 @@ class vim_db():
         else:
             where_ = ""
         #print 'where_', where_
-        limit_ = "LIMIT " + str(sql_dict['LIMIT']) if 'LIMIT' in sql_dict else ""
+        limit_ = "LIMIT " + str(sql_dict['LIMIT']) if sql_dict.get("LIMIT") else ""
         #print 'limit_', limit_
         cmd =  " ".join( (select_, from_, where_, limit_) )
         for retry_ in range(0,2):

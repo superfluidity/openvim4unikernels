@@ -30,7 +30,7 @@ and host controllers
 
 __author__="Alfonso Tierno"
 __date__ ="$10-jul-2014 12:07:15$"
-__version__="0.5.2-r519"
+__version__="0.5.3-r520"
 version_date="Jan 2017"
 database_version="0.10"      #expected database schema version
 
@@ -39,19 +39,14 @@ import auxiliary_functions as af
 import sys
 import getopt
 import time
-import vim_db
 import yaml
 import os
 from jsonschema import validate as js_v, exceptions as js_e
-import host_thread as ht
-import dhcp_thread as dt
-import openflow_thread as oft
-import threading
 from vim_schema import config_schema
 import logging
 import logging.handlers as log_handlers
-import imp
 import socket
+import ovim
 
 global config_dic
 global logger
@@ -113,13 +108,6 @@ def load_configuration(configuration_file):
         return (False, "Error loading configuration file '"+configuration_file+"': "+str(e))
     return (True, config)
 
-def create_database_connection(config_dic):
-    db = vim_db.vim_db( (config_dic["network_vlan_range_start"],config_dic["network_vlan_range_end"]), config_dic['log_level_db'] );
-    if db.connect(config_dic['db_host'], config_dic['db_user'], config_dic['db_passwd'], config_dic['db_name']) == -1:
-        logger.error("Cannot connect to database %s at %s@%s", config_dic['db_name'], config_dic['db_user'], config_dic['db_host'])
-        exit(-1)
-    return db
-
 def usage():
     print "Usage: ", sys.argv[0], "[options]"
     print "      -v|--version: prints current version"
@@ -144,7 +132,7 @@ if __name__=="__main__":
     log_format_simple =  "%(asctime)s %(levelname)s  %(name)s %(filename)s:%(lineno)s %(message)s"
     log_formatter_simple = logging.Formatter(log_format_simple, datefmt='%Y-%m-%dT%H:%M:%S')
     logging.basicConfig(format=log_format_simple, level= logging.DEBUG)
-    logger = logging.getLogger('openmano')
+    logger = logging.getLogger('openvim')
     logger.setLevel(logging.DEBUG)
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:", ["config=", "help", "version", "port=", "adminport=", "log-file=", "dbname="])
@@ -182,6 +170,7 @@ if __name__=="__main__":
             assert False, "Unhandled option"
 
     
+    engine = None
     try:
         #Load configuration file
         r, config_dic = load_configuration(config_file)
@@ -229,136 +218,20 @@ if __name__=="__main__":
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
         config_dic['version'] = __version__
 
-    #Connect to database
-        db_http = create_database_connection(config_dic)
-        r = db_http.get_db_version()
-        if r[0]<0:
-            logger.error("DATABASE is not a VIM one or it is a '0.0' version. Try to upgrade to version '%s' with './database_utils/migrate_vim_db.sh'", database_version)
-            exit(-1)
-        elif r[1]!=database_version:
-            logger.error("DATABASE wrong version '%s'. Try to upgrade/downgrade to version '%s' with './database_utils/migrate_vim_db.sh'", r[1], database_version) 
-            exit(-1)
-        db_of = create_database_connection(config_dic)
-        db_lock= threading.Lock()
-        config_dic['db'] = db_of
-        config_dic['db_lock'] = db_lock
+        config_dic["database_version"] = database_version
+        config_dic["logger_name"] = "openvim"
 
-    #precreate interfaces; [bridge:<host_bridge_name>, VLAN used at Host, uuid of network camping in this bridge, speed in Gbit/s
-        config_dic['dhcp_nets']=[]
-        config_dic['bridge_nets']=[]
-        for bridge,vlan_speed in config_dic["bridge_ifaces"].items():
-            #skip 'development_bridge'
-            if config_dic['mode'] == 'development' and config_dic['development_bridge'] == bridge:
-                continue
-            config_dic['bridge_nets'].append( [bridge, vlan_speed[0], vlan_speed[1], None] )
-        del config_dic["bridge_ifaces"]
+        engine = ovim.ovim(config_dic)
+        engine.start_service()
 
-        #check if this bridge is already used (present at database) for a network)
-        used_bridge_nets=[]
-        for brnet in config_dic['bridge_nets']:
-            r,nets = db_of.get_table(SELECT=('uuid',), FROM='nets',WHERE={'provider': "bridge:"+brnet[0]})
-            if r>0:
-                brnet[3] = nets[0]['uuid']
-                used_bridge_nets.append(brnet[0])
-                if config_dic.get("dhcp_server"):
-                    if brnet[0] in config_dic["dhcp_server"]["bridge_ifaces"]:
-                        config_dic['dhcp_nets'].append(nets[0]['uuid'])
-        if len(used_bridge_nets) > 0 :
-            logger.info("found used bridge nets: " + ",".join(used_bridge_nets))
-        #get nets used by dhcp
-        if config_dic.get("dhcp_server"):
-            for net in config_dic["dhcp_server"].get("nets", () ):
-                r,nets = db_of.get_table(SELECT=('uuid',), FROM='nets',WHERE={'name': net})
-                if r>0:
-                    config_dic['dhcp_nets'].append(nets[0]['uuid'])
-    
-    # get host list from data base before starting threads
-        r,hosts = db_of.get_table(SELECT=('name','ip_name','user','uuid'), FROM='hosts', WHERE={'status':'ok'})
-        if r<0:
-            logger.error("Cannot get hosts from database %s", hosts)
-            exit(-1)
-    # create connector to the openflow controller
-        of_test_mode = False if config_dic['mode']=='normal' or config_dic['mode']=="OF only" else True
-
-        if of_test_mode:
-            OF_conn = oft.of_test_connector({"of_debug": config_dic['log_level_of']} )
-        else:
-            #load other parameters starting by of_ from config dict in a temporal dict
-            temp_dict={ "of_ip":  config_dic['of_controller_ip'],
-                        "of_port": config_dic['of_controller_port'], 
-                        "of_dpid": config_dic['of_controller_dpid'],
-                        "of_debug":   config_dic['log_level_of']
-                }
-            for k,v in config_dic.iteritems():
-                if type(k) is str and k[0:3]=="of_" and k[0:13] != "of_controller":
-                    temp_dict[k]=v
-            if config_dic['of_controller']=='opendaylight':
-                module = "ODL"
-            elif "of_controller_module" in config_dic:
-                module = config_dic["of_controller_module"]
-            else:
-                module = config_dic['of_controller']
-            module_info=None
-            try:
-                module_info = imp.find_module(module)
-            
-                OF_conn = imp.load_module("OF_conn", *module_info)
-                try:
-                    OF_conn = OF_conn.OF_conn(temp_dict)
-                except Exception as e: 
-                    logger.error("Cannot open the Openflow controller '%s': %s", type(e).__name__, str(e))
-                    if module_info and module_info[0]:
-                        file.close(module_info[0])
-                    exit(-1)
-            except (IOError, ImportError) as e:
-                if module_info and module_info[0]:
-                    file.close(module_info[0])
-                logger.error("Cannot open openflow controller module '%s'; %s: %s; revise 'of_controller' field of configuration file.", module, type(e).__name__, str(e))
-                exit(-1)
-
-
-    #create openflow thread
-        thread = oft.openflow_thread(OF_conn, of_test=of_test_mode, db=db_of,  db_lock=db_lock,
-                        pmp_with_same_vlan=config_dic['of_controller_nets_with_same_vlan'],
-                        debug=config_dic['log_level_of'])
-        r,c = thread.OF_connector.obtain_port_correspondence()
-        if r<0:
-            logger.error("Cannot get openflow information %s", c)
-            exit()
-        thread.start()
-        config_dic['of_thread'] = thread
-
-    #create dhcp_server thread
-        host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
-        dhcp_params = config_dic.get("dhcp_server")
-        if dhcp_params:
-            thread = dt.dhcp_thread(dhcp_params=dhcp_params, test=host_test_mode, dhcp_nets=config_dic["dhcp_nets"], db=db_of,  db_lock=db_lock, debug=config_dic['log_level_of'])
-            thread.start()
-            config_dic['dhcp_thread'] = thread
-
-        
-    #Create one thread for each host
-        host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
-        host_develop_mode = True if config_dic['mode']=='development' else False
-        host_develop_bridge_iface = config_dic.get('development_bridge', None)
-        config_dic['host_threads'] = {}
-        for host in hosts:
-            host['image_path'] = '/opt/VNF/images/openvim'
-            thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=db_of, db_lock=db_lock,
-                    test=host_test_mode, image_path=config_dic['image_path'], version=config_dic['version'],
-                    host_id=host['uuid'], develop_mode=host_develop_mode, develop_bridge_iface=host_develop_bridge_iface  )
-            thread.start()
-            config_dic['host_threads'][ host['uuid'] ] = thread
-                
-            
         
     #Create thread to listen to web requests
-        http_thread = httpserver.httpserver(db_http, 'http', config_dic['http_host'], config_dic['http_port'], False, config_dic)
+        http_thread = httpserver.httpserver(engine, 'http', config_dic['http_host'], config_dic['http_port'], False, config_dic)
         http_thread.start()
         
-        if 'http_admin_port' in config_dic: 
-            db_http = create_database_connection(config_dic)
-            http_thread_admin = httpserver.httpserver(db_http, 'http-admin', config_dic['http_host'], config_dic['http_admin_port'], True)
+        if 'http_admin_port' in config_dic:
+            engine2 = ovim.ovim(config_dic)
+            http_thread_admin = httpserver.httpserver(engine2, 'http-admin', config_dic['http_host'], config_dic['http_admin_port'], True)
             http_thread_admin.start()
         else:
             http_thread_admin = None
@@ -389,21 +262,14 @@ if __name__=="__main__":
     except LoadConfigurationException as e:
         logger.critical(str(e))
         exit(-1)
+    except ovim.ovimException as e:
+        logger.critical(str(e))
+        exit(-1)
 
     logger.info('Exiting openvimd')
-    threads = config_dic.get('host_threads', {})
-    if 'of_thread' in config_dic:
-        threads['of'] = (config_dic['of_thread'])
-    if 'dhcp_thread' in config_dic:
-        threads['dhcp'] = (config_dic['dhcp_thread'])
-    
-    for thread in threads.values():
-        thread.insert_task("exit")
-    for thread in threads.values():
-        thread.join()
-    #http_thread.join()
-    #if http_thread_admin is not None: 
-    #http_thread_admin.join()
+    if engine:
+        engine.stop_service()
+
     logger.debug( "bye!")
     exit()
 
