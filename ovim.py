@@ -239,9 +239,6 @@ class ovim():
             thread.insert_task("exit")
         for thread in threads.values():
             thread.join()
-            # http_thread.join()
-            # if http_thread_admin is not None:
-            # http_thread_admin.join()
 
 
     def get_ports(self, columns=None, filter={}, limit=None):

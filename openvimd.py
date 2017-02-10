@@ -171,6 +171,9 @@ if __name__=="__main__":
 
     
     engine = None
+    http_thread = None
+    http_thread_admin = None
+
     try:
         #Load configuration file
         r, config_dic = load_configuration(config_file)
@@ -269,6 +272,10 @@ if __name__=="__main__":
     logger.info('Exiting openvimd')
     if engine:
         engine.stop_service()
+    if http_thread:
+        http_thread.join(1)
+    if http_thread_admin:
+        http_thread_admin.join(1)
 
     logger.debug( "bye!")
     exit()
