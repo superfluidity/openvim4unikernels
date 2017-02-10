@@ -37,6 +37,7 @@ import imp
 import host_thread as ht
 import dhcp_thread as dt
 import openflow_thread as oft
+from netaddr import IPNetwork, IPAddress, all_matching_cidrs
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -89,6 +90,7 @@ class ovim():
         self.logger = logging.getLogger(configuration["logger_name"])
         self.db = None
         self.db =   self._create_database_connection()
+
 
     def _create_database_connection(self):
         db = vim_db.vim_db((self.config["network_vlan_range_start"], self.config["network_vlan_range_end"]),
@@ -228,6 +230,18 @@ class ovim():
             thread.start()
             self.config['host_threads'][host['uuid']] = thread
 
+        # create ovs dhcp thread
+        result, content = self.db.get_table(FROM='nets')
+        if result < 0:
+            self.logger.error("http_get_ports Error %d %s", result, content)
+            raise ovimException(str(content), -result)
+
+        for net in content:
+            net_type = net['type']
+            if net_type == 'bridge_data' or net_type == 'bridge_man' and net["provider"][:4]=="OVS:" and net["enable_dhcp"] == "true":
+                if net['enable_dhcp'] == 'true':
+                    self.launch_dhcp_server(net['vlan'], net['dhcp_first_ip'], net['dhcp_last_ip'], net['cidr'])
+
     def stop_service(self):
         threads = self.config.get('host_threads', {})
         if 'of_thread' in self.config:
@@ -353,3 +367,53 @@ class ovim():
             return port_id
         else:
             raise ovimException("Error {}".format(content), http_code=-result)
+
+    def get_dhcp_controller(self):
+        """
+        Create an host_thread object for manage openvim controller and not create a thread for itself
+        :return: dhcp_host openvim controller object
+        """
+
+        if 'openvim_controller' in self.config['host_threads']:
+            return self.config['host_threads']['openvim_controller']
+
+        bridge_ifaces = []
+        controller_ip = self.config['ovs_controller_ip']
+        ovs_controller_user = self.config['ovs_controller_user']
+
+        host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
+        host_develop_mode = True if self.config['mode'] == 'development' else False
+
+        dhcp_host = ht.host_thread(name='openvim_controller', user=ovs_controller_user, host=controller_ip,
+                                   db=self.config['db'],
+                                   db_lock=self.config['db_lock'], test=host_test_mode,
+                                   image_path=self.config['image_path'], version=self.config['version'],
+                                   host_id='openvim_controller', develop_mode=host_develop_mode,
+                                   develop_bridge_iface=bridge_ifaces)
+
+        self.config['host_threads']['openvim_controller'] = dhcp_host
+        if not host_test_mode:
+            dhcp_host.ssh_connect()
+        return dhcp_host
+
+    def launch_dhcp_server(self, vlan, first_ip, last_ip, cidr):
+        """
+        Launch a dhcpserver base on dnsmasq attached to the net base on vlan id across the the openvim computes
+        :param vlan: vlan identifier
+        :param first_ip: First dhcp range ip
+        :param last_ip: Last dhcp range ip
+        :param cidr: net cidr
+        :return:
+        """
+        ip_tools = IPNetwork(cidr)
+        dhcp_netmask = str(ip_tools.netmask)
+        ip_range = [first_ip, last_ip]
+
+        dhcp_path = self.config['ovs_controller_file_path']
+
+        controller_host = self.get_dhcp_controller()
+        controller_host.create_linux_bridge(vlan)
+        controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
+        controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path)
+
+

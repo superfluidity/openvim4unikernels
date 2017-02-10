@@ -661,34 +661,6 @@ def http_post_hosts():
         return
 
 
-def get_dhcp_controller():
-    """
-    Create an host_thread object for manage openvim controller and not create a thread for itself
-    :return: dhcp_host openvim controller object
-    """
-
-    if 'openvim_controller' in config_dic['host_threads']:
-        return config_dic['host_threads']['openvim_controller']
-
-    bridge_ifaces = []
-    controller_ip = config_dic['ovs_controller_ip']
-    ovs_controller_user = config_dic['ovs_controller_user']
-
-    host_test_mode = True if config_dic['mode'] == 'test' or config_dic['mode'] == "OF only" else False
-    host_develop_mode = True if config_dic['mode'] == 'development' else False
-
-    dhcp_host = ht.host_thread(name='openvim_controller', user=ovs_controller_user, host=controller_ip, db=config_dic['db'],
-                               db_lock=config_dic['db_lock'], test=host_test_mode,
-                               image_path=config_dic['image_path'], version=config_dic['version'],
-                               host_id='openvim_controller', develop_mode=host_develop_mode,
-                               develop_bridge_iface=bridge_ifaces)
-
-    config_dic['host_threads']['openvim_controller'] = dhcp_host
-    if not host_test_mode:
-        dhcp_host.ssh_connect()
-    return dhcp_host
-
-
 def delete_dhcp_ovs_bridge(vlan, net_uuid):
     """
     Delete bridges and port created during dhcp launching at openvim controller
@@ -698,9 +670,11 @@ def delete_dhcp_ovs_bridge(vlan, net_uuid):
     """
     dhcp_path = config_dic['ovs_controller_file_path']
 
-    controller_host = get_dhcp_controller()
-    controller_host.delete_dhcp_port(vlan, net_uuid)
-    controller_host.delete_dhcp_server(vlan, net_uuid, dhcp_path)
+    http_controller = config_dic['http_threads'][threading.current_thread().name]
+    dhcp_controller = http_controller.ovim.get_dhcp_controller()
+
+    dhcp_controller.delete_dhcp_port(vlan, net_uuid)
+    dhcp_controller.delete_dhcp_server(vlan, net_uuid, dhcp_path)
 
 
 def create_dhcp_ovs_bridge():
@@ -708,8 +682,10 @@ def create_dhcp_ovs_bridge():
     Initialize bridge to allocate the dhcp server at openvim controller
     :return:
     """
-    controller_host = get_dhcp_controller()
-    controller_host.create_ovs_bridge()
+    http_controller = config_dic['http_threads'][threading.current_thread().name]
+    dhcp_controller = http_controller.ovim.get_dhcp_controller()
+
+    dhcp_controller.create_ovs_bridge()
 
 
 def set_mac_dhcp(vm_ip, vlan, first_ip, last_ip, cidr, mac):
@@ -733,8 +709,10 @@ def set_mac_dhcp(vm_ip, vlan, first_ip, last_ip, cidr, mac):
     if not len(all_matching_cidrs(vm_ip, new_cidr)):
         vm_ip = None
 
-    controller_host = get_dhcp_controller()
-    controller_host.set_mac_dhcp_server(vm_ip, mac, vlan, dhcp_netmask, dhcp_path)
+    http_controller = config_dic['http_threads'][threading.current_thread().name]
+    dhcp_controller = http_controller.ovim.get_dhcp_controller()
+
+    dhcp_controller.set_mac_dhcp_server(vm_ip, mac, vlan, dhcp_netmask, dhcp_path)
 
 
 def delete_mac_dhcp(vm_ip, vlan, mac):
@@ -748,28 +726,10 @@ def delete_mac_dhcp(vm_ip, vlan, mac):
 
     dhcp_path = config_dic['ovs_controller_file_path']
 
-    controller_host = get_dhcp_controller()
-    controller_host.delete_mac_dhcp_server(vm_ip, mac, vlan, dhcp_path)
+    http_controller = config_dic['http_threads'][threading.current_thread().name]
+    dhcp_controller = http_controller.ovim.get_dhcp_controller()
 
-
-def launch_dhcp_server(vlan, first_ip, last_ip, cidr):
-    """
-    Launch a dhcpserver base on dnsmasq attached to the net base on vlan id across the the openvim computes
-    :param vlan: vlan identifier
-    :param first_ip: First dhcp range ip
-    :param last_ip: Last dhcp range ip
-    :param cidr: net cidr
-    :return:
-    """
-    ip_tools = IPNetwork(cidr)
-    dhcp_netmask = str(ip_tools.netmask)
-    ip_range = [first_ip, last_ip]
-    dhcp_path = config_dic['ovs_controller_file_path']
-
-    controller_host = get_dhcp_controller()
-    controller_host.create_linux_bridge(vlan)
-    controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
-    controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path)
+    dhcp_controller.delete_mac_dhcp_server(vm_ip, mac, vlan, dhcp_path)
 
 
 def create_vxlan_mesh(host_id):
@@ -784,11 +744,14 @@ def create_vxlan_mesh(host_id):
     if len(existing_hosts['hosts']) > 0:
         # vlxan mesh creation between openvim controller and computes
         computes_available = existing_hosts['hosts']
-        controller_host = get_dhcp_controller()
+
+        http_controller = config_dic['http_threads'][threading.current_thread().name]
+        dhcp_controller = http_controller.ovim.get_dhcp_controller()
+
         for compute in computes_available:
             vxlan_interface_name = get_vxlan_interface(compute['id'][:8])
-            config_dic['host_threads'][compute['id']].insert_task("new-vxlan", dhcp_compute_name, controller_host.host)
-            controller_host.create_ovs_vxlan_tunnel(vxlan_interface_name, compute['ip_name'])
+            config_dic['host_threads'][compute['id']].insert_task("new-vxlan", dhcp_compute_name, dhcp_controller.host)
+            dhcp_controller.create_ovs_vxlan_tunnel(vxlan_interface_name, compute['ip_name'])
 
         # vlxan mesh creation between openvim computes
         for count, compute_owner in enumerate(computes_available):
@@ -797,7 +760,7 @@ def create_vxlan_mesh(host_id):
                     pass
                 else:
                     vxlan_interface_name = get_vxlan_interface(compute_owner['id'][:8])
-                    controller_host.create_ovs_vxlan_tunnel(vxlan_interface_name, compute_owner['ip_name'])
+                    dhcp_controller.create_ovs_vxlan_tunnel(vxlan_interface_name, compute_owner['ip_name'])
                     config_dic['host_threads'][compute['id']].insert_task("new-vxlan",
                                                                           vxlan_interface_name,
                                                                           compute_owner['ip_name'])
@@ -812,17 +775,20 @@ def delete_vxlan_mesh(host_id):
     computes_available = existing_hosts['hosts']
     #
     vxlan_interface_name = get_vxlan_interface(host_id[:8])
-    controller_host = get_dhcp_controller()
-    controller_host.delete_ovs_vxlan_tunnel(vxlan_interface_name)
+
+    http_controller = config_dic['http_threads'][threading.current_thread().name]
+    dhcp_host = http_controller.ovim.get_dhcp_controller()
+
+    dhcp_host.delete_ovs_vxlan_tunnel(vxlan_interface_name)
     # remove bridge from openvim controller if no more computes exist
     if len(existing_hosts):
-        controller_host.delete_ovs_bridge()
+        dhcp_host.delete_ovs_bridge()
     # Remove vxlan mesh
     for compute in computes_available:
         if host_id == compute['id']:
             pass
         else:
-            controller_host.delete_ovs_vxlan_tunnel(vxlan_interface_name)
+            dhcp_host.delete_ovs_vxlan_tunnel(vxlan_interface_name)
             config_dic['host_threads'][compute['id']].insert_task("del-vxlan", vxlan_interface_name)
 
 
@@ -1664,7 +1630,8 @@ def http_post_server_id(tenant_id):
                         config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
 
                         set_mac_dhcp(vm_dhcp_ip, vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, c2[0]['mac'])
-                        launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr)
+                        http_controller = config_dic['http_threads'][threading.current_thread().name]
+                        http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr)
 
         #Start server
         server['uuid'] = new_instance
@@ -2060,13 +2027,13 @@ def http_post_networks():
     network['provider'] = net_provider
     network['type']     = net_type
     network['vlan']     = net_vlan
-
+    dhcp_integrity = True
     if 'enable_dhcp' in network and network['enable_dhcp']:
-        check_dhcp_data_integrity(network)
+        dhcp_integrity = check_dhcp_data_integrity(network)
 
     result, content = my.db.new_row('nets', network, True, True)
     
-    if result >= 0:
+    if result >= 0 and dhcp_integrity:
         if bridge_net!=None:
             bridge_net[3] = content
         if config_dic.get("dhcp_server") and config_dic['network_type'] == 'bridge':
@@ -2093,12 +2060,20 @@ def check_dhcp_data_integrity(network):
 
     if "cidr" in network:
         cidr = network["cidr"]
+        ip_tools = IPNetwork(cidr)
+        cidr_len = ip_tools.prefixlen
+        if cidr_len > 29:
+            return False
 
         ips = IPNetwork(cidr)
         if "dhcp_first_ip" not in network:
             network["dhcp_first_ip"] = str(ips[2])
         if "dhcp_last_ip" not in network:
             network["dhcp_last_ip"] = str(ips[-2])
+
+        return True
+    else:
+        return False
 
 
 @bottle.route(url_base + '/networks/<network_id>', method='PUT')
