@@ -341,23 +341,20 @@ class host_thread(threading.Thread):
                 elif task[0] == 'new-ovsbridge':
                     print self.name, ": Creating compute OVS bridge"
                     self.create_ovs_bridge()
-                    break
                 elif task[0] == 'new-vxlan':
                     print self.name, ": Creating vxlan tunnel=" + task[1] + ", remote ip=" + task[2]
                     self.create_ovs_vxlan_tunnel(task[1], task[2])
-                    break
                 elif task[0] == 'del-ovsbridge':
                     print self.name, ": Deleting OVS bridge"
                     self.delete_ovs_bridge()
-                    break
                 elif task[0] == 'del-vxlan':
                     print self.name, ": Deleting vxlan " + task[1] + " tunnel"
                     self.delete_ovs_vxlan_tunnel(task[1])
-                    break
                 elif task[0] == 'create-ovs-bridge-port':
                     print self.name, ": Adding port ovim-" + task[1] + " to OVS bridge"
                     self.create_ovs_bridge_port(task[1])
                 elif task[0] == 'del-ovs-port':
+                    print self.name, ": Delete bridge attached to ovs port vlan {} net {}".format(task[1], task[2])
                     self.delete_bridge_port_attached_to_ovs(task[1], task[2])
                 else:
                     print self.name, ": unknown task", task
