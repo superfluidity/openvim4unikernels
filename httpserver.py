@@ -684,7 +684,8 @@ def get_dhcp_controller():
                                develop_bridge_iface=bridge_ifaces)
 
     config_dic['host_threads']['openvim_controller'] = dhcp_host
-    dhcp_host.ssh_connect()
+    if not host_test_mode:
+        dhcp_host.ssh_connect()
     return dhcp_host
 
 
