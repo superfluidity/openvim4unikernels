@@ -396,7 +396,7 @@ class ovim():
             dhcp_host.ssh_connect()
         return dhcp_host
 
-    def launch_dhcp_server(self, vlan, first_ip, last_ip, cidr):
+    def launch_dhcp_server(self, vlan, first_ip, last_ip, cidr, gateway):
         """
         Launch a dhcpserver base on dnsmasq attached to the net base on vlan id across the the openvim computes
         :param vlan: vlan identifier
@@ -414,6 +414,6 @@ class ovim():
         controller_host = self.get_dhcp_controller()
         controller_host.create_linux_bridge(vlan)
         controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
-        controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path)
+        controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path, gateway)
 
 

@@ -1027,7 +1027,7 @@ class host_thread(threading.Thread):
         else:
             return False
 
-    def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path):
+    def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path, gateway):
         """
         Generate a linux bridge and attache the port to a OVS bridge
         :param self:
@@ -1035,6 +1035,7 @@ class host_thread(threading.Thread):
         :param ip_range: IP dhcp range
         :param netmask: network netmask
         :param dhcp_path: dhcp conf file path that live in namespace side
+        :param gateway: Gateway address for dhcp net
         :return: True if success
         """
 
@@ -1069,7 +1070,8 @@ class host_thread(threading.Thread):
         if not content:
             command = 'sudo  ip netns exec ' + net_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
               '--interface=' + interface + ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
-              ' --dhcp-range ' + dhcp_range + ' --pid-file=' + pid_file + ' --dhcp-leasefile=' + leases_path + '  --listen-address ' + ip_range[0]
+              ' --dhcp-range ' + dhcp_range + ' --pid-file=' + pid_file + ' --dhcp-leasefile=' + leases_path + \
+              '  --listen-address ' + gateway
 
         print self.name, ': command:', command
         (_, stdout, _) = self.ssh_conn.exec_command(command)

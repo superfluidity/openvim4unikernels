@@ -178,6 +178,7 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 4010 ] && DATABASE_TARGET_VER_NUM=8   #0.4.10  =>  8
 [ $OPENVIM_VER_NUM -ge 5001 ] && DATABASE_TARGET_VER_NUM=9   #0.5.1   =>  9
 [ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=10  #0.5.2   => 10
+[ $OPENVIM_VER_NUM -ge 5004 ] && DATABASE_TARGET_VER_NUM=11  #0.5.4   => 11
 #TODO ... put next versions here
 
 
@@ -480,6 +481,19 @@ function downgrade_from_10(){
     echo "     change back types at 'ports'"
     echo "ALTER TABLE ports CHANGE COLUMN type type ENUM('instance:bridge','instance:data','external') NOT NULL DEFAULT 'instance:bridge' AFTER status;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '10';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function upgrade_to_11(){
+    echo "    upgrade database from version 0.10 to version 0.11"
+    echo "    Add gateway_ip colum to 'nets'"
+    echo "ALTER TABLE nets ADD COLUMN gateway_ip VARCHAR(64) NULL DEFAULT NULL AFTER dhcp_last_ip;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (11, '0.11', '0.5.4', 'Add gateway_ip colum to nets', '2017-02-13');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+function downgrade_from_11(){
+    echo "    downgrade database from version 0.11 to version 0.10"
+    echo "    Delete gateway_ip colum from 'nets'"
+    echo "ALTER TABLE nets DROP COLUMN gateway_ip;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '11';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 #TODO ... put funtions here
 

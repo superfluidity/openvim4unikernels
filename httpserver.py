@@ -1626,12 +1626,13 @@ def http_post_server_id(tenant_id):
                         dhcp_firt_ip = str(server_net['network']['dhcp_first_ip'])
                         dhcp_last_ip = str(server_net['network']['dhcp_last_ip'])
                         dhcp_cidr = str(server_net['network']['cidr'])
+                        gateway = str(server_net['network']['gateway'])
                         vm_dhcp_ip = c2[0]["ip_address"]
                         config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
 
                         set_mac_dhcp(vm_dhcp_ip, vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, c2[0]['mac'])
                         http_controller = config_dic['http_threads'][threading.current_thread().name]
-                        http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr)
+                        http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, gateway)
 
         #Start server
         server['uuid'] = new_instance
@@ -2070,6 +2071,8 @@ def check_dhcp_data_integrity(network):
             network["dhcp_first_ip"] = str(ips[2])
         if "dhcp_last_ip" not in network:
             network["dhcp_last_ip"] = str(ips[-2])
+        if "gateway_ip" not in network:
+            network["gateway_ip"] = str(ips[1])
 
         return True
     else:
