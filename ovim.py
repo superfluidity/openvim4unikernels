@@ -37,7 +37,8 @@ import imp
 import host_thread as ht
 import dhcp_thread as dt
 import openflow_thread as oft
-from netaddr import IPNetwork, IPAddress, all_matching_cidrs
+from netaddr import IPNetwork
+from jsonschema import validate as js_v, exceptions as js_e
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -238,9 +239,13 @@ class ovim():
 
         for net in content:
             net_type = net['type']
-            if net_type == 'bridge_data' or net_type == 'bridge_man' and net["provider"][:4]=="OVS:" and net["enable_dhcp"] == "true":
-                if net['enable_dhcp'] == 'true':
-                    self.launch_dhcp_server(net['vlan'], net['dhcp_first_ip'], net['dhcp_last_ip'], net['cidr'])
+            if net_type == 'bridge_data' or net_type == 'bridge_man' \
+                    and net["provider"][:4] =="OVS:" and net["enable_dhcp"] == "true":
+                    self.launch_dhcp_server(net['vlan'],
+                                            net['dhcp_first_ip'],
+                                            net['dhcp_last_ip'],
+                                            net['cidr'],
+                                            net['gateway_ip'])
 
     def stop_service(self):
         threads = self.config.get('host_threads', {})
@@ -254,6 +259,300 @@ class ovim():
         for thread in threads.values():
             thread.join()
 
+    def get_networks(self, select_=None, where_=None, limit_=100):
+        """
+        Retreive networks available
+        :param select_: List with select query parameters
+        :param where_: List with where query parameters
+        :param limit_: Query limit result
+        :return:
+        """
+        result, content = self.db.get_table(SELECT=select_, FROM='nets', WHERE=where_, LIMIT=limit_)
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+
+        convert_boolean(content, ('shared', 'admin_state_up', 'enable_dhcp'))
+
+        return content
+
+    def get_network_by_id(self, where_, limit_=100):
+        """
+
+        :param where_:
+        :param limit_:
+        :return:
+        """
+        # obtain data
+        if 'uuid' not in where_:
+            raise ovimException("Not network id was not found" )
+        result, content = self.db.get_table(FROM='nets', WHERE=where_, LIMIT=limit_)
+
+        network_id = where_['uuid']
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+        elif result == 0:
+            raise ovimException("http_get_networks_id network '%s' not found" % network_id, -result)
+        else:
+            convert_boolean(content, ('shared', 'admin_state_up', 'enable_dhcp'))
+            # get ports
+            result, ports = self.db.get_table(FROM='ports', SELECT=('uuid as port_id',),
+                                            WHERE={'net_id': network_id}, LIMIT=100)
+            if len(ports) > 0:
+                content[0]['ports'] = ports
+            return content
+
+    def set_network(self, network):
+        """
+
+        :return:
+        """
+        tenant_id = network.get('tenant_id')
+
+        if tenant_id:
+            result, _ = self.db.get_table(FROM='tenants', SELECT=('uuid',), WHERE={'uuid': tenant_id, "enabled": True})
+            if result <= 0:
+                raise ovimException("set_network error, no tenant founded", -result)
+
+        bridge_net = None
+        # check valid params
+        net_provider = network.get('provider')
+        net_type = network.get('type')
+        net_enable_dhcp = network.get('enable_dhcp')
+        if net_enable_dhcp:
+            net_cidr = network.get('cidr')
+
+        net_vlan = network.get("vlan")
+        net_bind_net = network.get("bind_net")
+        net_bind_type = network.get("bind_type")
+        name = network["name"]
+
+        # check if network name ends with :<vlan_tag> and network exist in order to make and automated bindning
+        vlan_index = name.rfind(":")
+        if not net_bind_net and not net_bind_type and vlan_index > 1:
+            try:
+                vlan_tag = int(name[vlan_index + 1:])
+                if not vlan_tag and vlan_tag < 4096:
+                    net_bind_net = name[:vlan_index]
+                    net_bind_type = "vlan:" + name[vlan_index + 1:]
+            except:
+                pass
+
+        if net_bind_net:
+            # look for a valid net
+            if self._check_valid_uuid(net_bind_net):
+                net_bind_key = "uuid"
+            else:
+                net_bind_key = "name"
+            result, content = self.db.get_table(FROM='nets', WHERE={net_bind_key: net_bind_net})
+            if result < 0:
+                raise ovimException(' getting nets from db ' + content, HTTP_Internal_Server_Error)
+            elif result == 0:
+                raise ovimException(" bind_net %s '%s'not found" % (net_bind_key, net_bind_net), HTTP_Bad_Request)
+            elif result > 1:
+                raise ovimException(" more than one bind_net %s '%s' found, use uuid" % (net_bind_key, net_bind_net), HTTP_Bad_Request)
+            network["bind_net"] = content[0]["uuid"]
+
+        if net_bind_type:
+            if net_bind_type[0:5] != "vlan:":
+                raise ovimException("bad format for 'bind_type', must be 'vlan:<tag>'", HTTP_Bad_Request)
+            if int(net_bind_type[5:]) > 4095 or int(net_bind_type[5:]) <= 0:
+                raise ovimException("bad format for 'bind_type', must be 'vlan:<tag>' with a tag between 1 and 4095",
+                                    HTTP_Bad_Request)
+            network["bind_type"] = net_bind_type
+
+        if net_provider:
+            if net_provider[:9] == "openflow:":
+                if net_type:
+                    if net_type != "ptp" and net_type != "data":
+                        raise ovimException(" only 'ptp' or 'data' net types can be bound to 'openflow'",
+                                            HTTP_Bad_Request)
+                else:
+                    net_type = 'data'
+            else:
+                if net_type:
+                    if net_type != "bridge_man" and net_type != "bridge_data":
+                        raise ovimException("Only 'bridge_man' or 'bridge_data' net types can be bound "
+                                            "to 'bridge', 'macvtap' or 'default", HTTP_Bad_Request)
+                else:
+                    net_type = 'bridge_man'
+
+        if not net_type:
+            net_type = 'bridge_man'
+
+        if net_provider:
+            if net_provider[:7] == 'bridge:':
+                # check it is one of the pre-provisioned bridges
+                bridge_net_name = net_provider[7:]
+                for brnet in self.config['bridge_nets']:
+                    if brnet[0] == bridge_net_name:  # free
+                        if not brnet[3]:
+                            raise ovimException("invalid 'provider:physical', "
+                                                "bridge '%s' is already used" % bridge_net_name, HTTP_Conflict)
+                        bridge_net = brnet
+                        net_vlan = brnet[1]
+                        break
+                        #            if bridge_net==None:
+                        #                bottle.abort(HTTP_Bad_Request, "invalid 'provider:physical', bridge '%s' is not one of the provisioned 'bridge_ifaces' in the configuration file" % bridge_net_name)
+                        #                return
+        elif self.config['network_type'] == 'bridge' and (net_type == 'bridge_data' or net_type == 'bridge_man'):
+            # look for a free precreated nets
+            for brnet in self.config['bridge_nets']:
+                if not brnet[3]:  # free
+                    if not bridge_net:
+                        if net_type == 'bridge_man':  # look for the smaller speed
+                            if brnet[2] < bridge_net[2]:
+                                bridge_net = brnet
+                        else:  # look for the larger speed
+                            if brnet[2] > bridge_net[2]:
+                                bridge_net = brnet
+                    else:
+                        bridge_net = brnet
+                        net_vlan = brnet[1]
+            if not bridge_net:
+                raise ovimException("Max limits of bridge networks reached. Future versions of VIM "
+                                    "will overcome this limit", HTTP_Bad_Request)
+            else:
+                print "using net", bridge_net
+                net_provider = "bridge:" + bridge_net[0]
+                net_vlan = bridge_net[1]
+        elif net_type == 'bridge_data' or net_type == 'bridge_man' and self.config['network_type'] == 'ovs':
+            net_provider = 'OVS'
+        if not net_vlan and (net_type == "data" or net_type == "ptp" or net_provider == "OVS"):
+            net_vlan = self.db.get_free_net_vlan()
+            if net_vlan < 0:
+                raise ovimException("Error getting an available vlan", HTTP_Internal_Server_Error)
+        if net_provider == 'OVS':
+            net_provider = 'OVS' + ":" + str(net_vlan)
+
+        network['provider'] = net_provider
+        network['type'] = net_type
+        network['vlan'] = net_vlan
+        dhcp_integrity = True
+        if 'enable_dhcp' in network and network['enable_dhcp']:
+            dhcp_integrity = self._check_dhcp_data_integrity(network)
+
+        result, content = self.db.new_row('nets', network, True, True)
+
+        if result >= 0 and dhcp_integrity:
+            if bridge_net:
+                bridge_net[3] = content
+            if self.config.get("dhcp_server") and self.config['network_type'] == 'bridge':
+                if network["name"] in self.config["dhcp_server"].get("nets", ()):
+                    self.config["dhcp_nets"].append(content)
+                    print "dhcp_server: add new net", content
+                elif not bridge_net and bridge_net[0] in self.config["dhcp_server"].get("bridge_ifaces", ()):
+                    self.config["dhcp_nets"].append(content)
+                    print "dhcp_server: add new net", content
+            return content
+        else:
+            print "http_post_networks error %d %s" % (result, content)
+            raise ovimException("Error posting network", HTTP_Internal_Server_Error)
+
+    @staticmethod
+    def _check_dhcp_data_integrity(network):
+        """
+        Check if all dhcp parameter for anet are valid, if not will be calculated from cidr value
+        :param network: list with user nets paramters
+        :return:
+        """
+        control_iface = []
+
+        if "cidr" in network:
+            cidr = network["cidr"]
+            ip_tools = IPNetwork(cidr)
+            cidr_len = ip_tools.prefixlen
+            if cidr_len > 29:
+                return False
+
+            ips = IPNetwork(cidr)
+            if "dhcp_first_ip" not in network:
+                network["dhcp_first_ip"] = str(ips[2])
+            if "dhcp_last_ip" not in network:
+                network["dhcp_last_ip"] = str(ips[-2])
+            if "gateway_ip" not in network:
+                network["gateway_ip"] = str(ips[1])
+
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def _check_valid_uuid( uuid):
+        id_schema = {"type": "string", "pattern": "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$"}
+        try:
+            js_v(uuid, id_schema)
+            return True
+        except js_e.ValidationError:
+            return False
+
+    def get_openflow_rules(self, network_id=None):
+        """
+        Get openflow id from DB
+        :param network_id: Network id, if none all networks will be retrieved
+        :return: Return a list with Openflow rules per net
+        """
+        # ignore input data
+        if not network_id:
+            where_ = {}
+        else:
+            where_ = {"net_id": network_id}
+
+        result, content = self.db.get_table(
+            SELECT=("name", "net_id", "priority", "vlan_id", "ingress_port", "src_mac", "dst_mac", "actions"),
+            WHERE=where_, FROM='of_flows')
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+        return content
+
+    def update_openflow_rules(self, network_id=None):
+
+        """
+        To make actions over the net. The action is to reinstall the openflow rules
+        network_id can be 'all'
+        :param network_id: Network id, if none all networks will be retrieved
+        :return : Number of nets updated
+        """
+
+        # ignore input data
+        if not network_id:
+            where_ = {}
+        else:
+            where_ = {"uuid": network_id}
+        result, content = self.db.get_table(SELECT=("uuid", "type"), WHERE=where_, FROM='nets')
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+
+        for net in content:
+            if net["type"] != "ptp" and net["type"] != "data":
+                result -= 1
+                continue
+            r, c = self.config['of_thread'].insert_task("update-net", net['uuid'])
+            if r < 0:
+                raise ovimException(str(c), -r)
+        return result
+
+    def clear_openflow_rules(self):
+        """
+        To make actions over the net. The action is to delete ALL openflow rules
+        :return: return operation result
+        """
+        # ignore input data
+        r, c = self.config['of_thread'].insert_task("clear-all")
+        if r < 0:
+            raise ovimException(str(c), -r)
+        return r
+
+    def get_openflow_ports(self):
+        """
+        Obtain switch ports names of openflow controller
+        :return: Return flow ports in DB
+        """
+        data = {'ports': self.config['of_thread'].OF_connector.pp2ofi}
+        return data
 
     def get_ports(self, columns=None, filter={}, limit=None):
         # result, content = my.db.get_ports(where_)
@@ -264,7 +563,6 @@ class ovim():
         else:
             convert_boolean(content, ('admin_state_up',))
             return content
-
 
     def new_port(self, port_data):
         port_data['type'] = 'external'

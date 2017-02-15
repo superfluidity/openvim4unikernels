@@ -458,15 +458,6 @@ def check_valid_tenant(my, tenant_id):
             return HTTP_Not_Found, "tenant '%s' not found" % tenant_id
     return 0, None
 
-def check_valid_uuid(uuid):
-    id_schema = {"type" : "string", "pattern": "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$"}
-    try:
-        js_v(uuid, id_schema)
-        return True
-    except js_e.ValidationError:
-        return False
-
-
 def is_url(url):
     '''
     Check if string value is a well-wormed url
@@ -1848,235 +1839,82 @@ def http_post_server_action(tenant_id, server_id):
 
 @bottle.route(url_base + '/networks', method='GET')
 def http_get_networks():
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #obtain data
-    select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_network,
-            ('id','name','tenant_id','type',
-             'shared','provider:vlan','status','last_error','admin_state_up','provider:physical') )
-    #TODO temporally remove tenant_id
-    if "tenant_id" in where_:
-        del where_["tenant_id"]
-    result, content = my.db.get_table(SELECT=select_, FROM='nets', WHERE=where_, LIMIT=limit_)
-    if result < 0:
-        print "http_get_networks error %d %s" % (result, content)
-        bottle.abort(-result, content)
-    else:
-        convert_boolean(content, ('shared', 'admin_state_up', 'enable_dhcp'))
-        delete_nulls(content)      
-        change_keys_http2db(content, http2db_network, reverse=True)  
-        data={'networks' : content}
+    try:
+        my = config_dic['http_threads'][threading.current_thread().name]
+        # obtain data
+        select_, where_, limit_ = filter_query_string(bottle.request.query, http2db_network,
+                                                      ('id', 'name', 'tenant_id', 'type',
+                                                       'shared', 'provider:vlan', 'status', 'last_error',
+                                                       'admin_state_up', 'provider:physical'))
+        if "tenant_id" in where_:
+            del where_["tenant_id"]
+        content = my.ovim.get_networks(select_, where_, limit_)
+
+        delete_nulls(content)
+        change_keys_http2db(content, http2db_network, reverse=True)
+        data = {'networks': content}
         return format_out(data)
+
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
 
 @bottle.route(url_base + '/networks/<network_id>', method='GET')
 def http_get_network_id(network_id):
         data = get_network_id(network_id)
         return format_out(data)
 
-def get_network_id(network_id):
-    my = config_dic['http_threads'][threading.current_thread().name]
-    # obtain data
-    where_ = bottle.request.query
-    where_['uuid'] = network_id
-    result, content = my.db.get_table(FROM='nets', WHERE=where_, LIMIT=100)
 
-    if result < 0:
-        print "http_get_networks_id error %d %s" % (result, content)
-        bottle.abort(-result, content)
-    elif result==0:
-        print "http_get_networks_id network '%s' not found" % network_id
-        bottle.abort(HTTP_Not_Found, 'network %s not found' % network_id)
-    else:
+def get_network_id(network_id):
+    try:
+        my = config_dic['http_threads'][threading.current_thread().name]
+        # obtain data
+        where_ = bottle.request.query
+        where_['uuid'] = network_id
+        content = my.ovim.get_network_by_id(where_)
+
         convert_boolean(content, ('shared', 'admin_state_up', 'enable_dhcp'))
-        change_keys_http2db(content, http2db_network, reverse=True)        
-        #get ports
-        result, ports = my.db.get_table(FROM='ports', SELECT=('uuid as port_id',), 
-                                              WHERE={'net_id': network_id}, LIMIT=100)
-        if len(ports) > 0:
-            content[0]['ports'] = ports
-        delete_nulls(content[0])      
-        data={'network' : content[0]}
+        change_keys_http2db(content, http2db_network, reverse=True)
+
+        # content[0]['ports'] = delete_nulls(content[0]['ports'])
+        delete_nulls(content[0])
+        data = {'network': content[0]}
         return data
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
 
 @bottle.route(url_base + '/networks', method='POST')
 def http_post_networks():
-    '''insert a network into the database.'''
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #parse input data
-    http_content = format_in( network_new_schema )
-    r = remove_extra_items(http_content, network_new_schema)
-    if r is not None: print "http_post_networks: Warning: remove extra items ", r
-    change_keys_http2db(http_content['network'], http2db_network)
-    network=http_content['network']
-    #check valid tenant_id
-    tenant_id= network.get('tenant_id')
-    if tenant_id!=None:
-        result, _ = my.db.get_table(FROM='tenants', SELECT=('uuid',), WHERE={'uuid': tenant_id,"enabled":True})
-        if result<=0:
-            bottle.abort(HTTP_Not_Found, 'tenant %s not found or not enabled' % tenant_id)
-            return
-    bridge_net = None
-    #check valid params
-    net_provider = network.get('provider')
-    net_type =     network.get('type')
-    net_enable_dhcp = network.get('enable_dhcp')
-    if net_enable_dhcp:
-        net_cidr = network.get('cidr')
-
-    net_vlan =     network.get("vlan")
-    net_bind_net = network.get("bind_net")
-    net_bind_type= network.get("bind_type")
-    name = network["name"]
-    
-    #check if network name ends with :<vlan_tag> and network exist in order to make and automated bindning
-    vlan_index =name.rfind(":")
-    if net_bind_net==None and net_bind_type==None and vlan_index > 1: 
-        try:
-            vlan_tag = int(name[vlan_index+1:])
-            if vlan_tag >0 and vlan_tag < 4096:
-                net_bind_net = name[:vlan_index]
-                net_bind_type = "vlan:" + name[vlan_index+1:]
-        except:
-            pass 
-        
-    if net_bind_net != None:
-        #look for a valid net
-        if check_valid_uuid(net_bind_net):
-            net_bind_key = "uuid"
-        else:
-            net_bind_key = "name"
-        result, content = my.db.get_table(FROM='nets', WHERE={net_bind_key: net_bind_net} )
-        if result<0:
-            bottle.abort(HTTP_Internal_Server_Error, 'getting nets from db ' + content)
-            return
-        elif result==0:
-            bottle.abort(HTTP_Bad_Request, "bind_net %s '%s'not found" % (net_bind_key, net_bind_net) )
-            return
-        elif result>1:
-            bottle.abort(HTTP_Bad_Request, "more than one bind_net %s '%s' found, use uuid" % (net_bind_key, net_bind_net) )
-            return
-        network["bind_net"] = content[0]["uuid"]
-    if net_bind_type != None:
-        if net_bind_type[0:5] != "vlan:":
-            bottle.abort(HTTP_Bad_Request, "bad format for 'bind_type', must be 'vlan:<tag>'")
-            return
-        if int(net_bind_type[5:]) > 4095 or int(net_bind_type[5:])<=0 :
-            bottle.abort(HTTP_Bad_Request, "bad format for 'bind_type', must be 'vlan:<tag>' with a tag between 1 and 4095")
-            return
-        network["bind_type"] = net_bind_type
-    
-    if net_provider!=None:
-        if net_provider[:9]=="openflow:":
-            if net_type!=None:
-                if net_type!="ptp" and net_type!="data":
-                    bottle.abort(HTTP_Bad_Request, "Only 'ptp' or 'data' net types can be bound to 'openflow'")
-            else:
-                net_type='data'
-        else:
-            if net_type!=None:
-                if net_type!="bridge_man" and net_type!="bridge_data":
-                    bottle.abort(HTTP_Bad_Request, "Only 'bridge_man' or 'bridge_data' net types can be bound to 'bridge', 'macvtap' or 'default")
-            else:
-                net_type='bridge_man'
-    
-    if net_type==None:
-        net_type='bridge_man' 
-        
-    if net_provider != None:
-        if net_provider[:7]=='bridge:':
-            #check it is one of the pre-provisioned bridges
-            bridge_net_name = net_provider[7:]
-            for brnet in config_dic['bridge_nets']:
-                if brnet[0]==bridge_net_name: # free
-                    if brnet[3] != None:
-                        bottle.abort(HTTP_Conflict, "invalid 'provider:physical', bridge '%s' is already used" % bridge_net_name)
-                        return
-                    bridge_net=brnet
-                    net_vlan = brnet[1]
-                    break
-#            if bridge_net==None:     
-#                bottle.abort(HTTP_Bad_Request, "invalid 'provider:physical', bridge '%s' is not one of the provisioned 'bridge_ifaces' in the configuration file" % bridge_net_name)
-#                return
-    elif config_dic['network_type'] == 'bridge' and ( net_type =='bridge_data' or net_type ==  'bridge_man' ):
-        #look for a free precreated nets
-        for brnet in config_dic['bridge_nets']:
-            if brnet[3]==None: # free
-                if bridge_net != None:
-                    if net_type=='bridge_man': #look for the smaller speed
-                        if brnet[2] < bridge_net[2]:   bridge_net = brnet
-                    else: #look for the larger speed
-                        if brnet[2] > bridge_net[2]:   bridge_net = brnet
-                else:
-                    bridge_net = brnet
-                    net_vlan = brnet[1]
-        if bridge_net==None:
-            bottle.abort(HTTP_Bad_Request, "Max limits of bridge networks reached. Future versions of VIM will overcome this limit")
-            return
-        else:
-            print "using net", bridge_net
-            net_provider = "bridge:"+bridge_net[0]
-            net_vlan = bridge_net[1]
-    elif net_type == 'bridge_data' or net_type == 'bridge_man' and config_dic['network_type'] == 'ovs':
-        net_provider = 'OVS'
-    if not net_vlan and (net_type == "data" or net_type == "ptp" or net_provider == "OVS"):
-        net_vlan = my.db.get_free_net_vlan()
-        if net_vlan < 0:
-            bottle.abort(HTTP_Internal_Server_Error, "Error getting an available vlan")
-            return
-    if net_provider == 'OVS':
-        net_provider = 'OVS' + ":" + str(net_vlan)
-
-    network['provider'] = net_provider
-    network['type']     = net_type
-    network['vlan']     = net_vlan
-    dhcp_integrity = True
-    if 'enable_dhcp' in network and network['enable_dhcp']:
-        dhcp_integrity = check_dhcp_data_integrity(network)
-
-    result, content = my.db.new_row('nets', network, True, True)
-    
-    if result >= 0 and dhcp_integrity:
-        if bridge_net!=None:
-            bridge_net[3] = content
-        if config_dic.get("dhcp_server") and config_dic['network_type'] == 'bridge':
-            if network["name"] in config_dic["dhcp_server"].get("nets", () ):
-                config_dic["dhcp_nets"].append(content)
-                print "dhcp_server: add new net", content
-            elif bridge_net != None and bridge_net[0] in config_dic["dhcp_server"].get("bridge_ifaces", () ):
-                config_dic["dhcp_nets"].append(content)
-                print "dhcp_server: add new net", content
-        return http_get_network_id(content)
-    else:
-        print "http_post_networks error %d %s" % (result, content)
-        bottle.abort(-result, content)
-        return
-
-
-def check_dhcp_data_integrity(network):
     """
-    Check if all dhcp parameter for anet are valid, if not will be calculated from cidr value
-    :param network: list with user nets paramters
+    Insert a network into the database.
     :return:
     """
-    control_iface = []
-
-    if "cidr" in network:
-        cidr = network["cidr"]
-        ip_tools = IPNetwork(cidr)
-        cidr_len = ip_tools.prefixlen
-        if cidr_len > 29:
-            return False
-
-        ips = IPNetwork(cidr)
-        if "dhcp_first_ip" not in network:
-            network["dhcp_first_ip"] = str(ips[2])
-        if "dhcp_last_ip" not in network:
-            network["dhcp_last_ip"] = str(ips[-2])
-        if "gateway_ip" not in network:
-            network["gateway_ip"] = str(ips[1])
-
-        return True
-    else:
-        return False
+    try:
+        my = config_dic['http_threads'][threading.current_thread().name]
+        # parse input data
+        http_content = format_in(network_new_schema )
+        r = remove_extra_items(http_content, network_new_schema)
+        if r is not None:
+            print "http_post_networks: Warning: remove extra items ", r
+        change_keys_http2db(http_content['network'], http2db_network)
+        network = http_content['network']
+        content = my.ovim.set_network(network)
+        return http_get_network_id(content)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
 
 @bottle.route(url_base + '/networks/<network_id>', method='PUT')
@@ -2203,84 +2041,99 @@ def http_delete_network_id(network_id):
 #
 # OPENFLOW
 #
+
+
 @bottle.route(url_base + '/networks/<network_id>/openflow', method='GET')
 def http_get_openflow_id(network_id):
-    '''To obtain the list of openflow rules of a network
-    '''
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #ignore input data
-    if network_id=='all':
-        where_={}
-    else:
-        where_={"net_id": network_id}
-    result, content = my.db.get_table(SELECT=("name","net_id","priority","vlan_id","ingress_port","src_mac","dst_mac","actions"),
-            WHERE=where_, FROM='of_flows')
-    if result < 0:
-        bottle.abort(-result, content)
-        return
-    data={'openflow-rules' : content}
+    """
+    To obtain the list of openflow rules of a network
+    :param network_id: network id
+    :return:
+    """
+
+    # ignore input data
+    if network_id == 'all':
+        network_id = None
+    try:
+        my = config_dic['http_threads'][threading.current_thread().name]
+        content = my.ovim.get_openflow_rules(network_id)
+        data = {'openflow-rules': content}
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
     return format_out(data)
+
 
 @bottle.route(url_base + '/networks/<network_id>/openflow', method='PUT')
 def http_put_openflow_id(network_id):
-    '''To make actions over the net. The action is to reinstall the openflow rules
+    """
+    To make actions over the net. The action is to reinstall the openflow rules
     network_id can be 'all'
-    '''
-    my = config_dic['http_threads'][ threading.current_thread().name ]
+    :param network_id: network id
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
     if not my.admin:
         bottle.abort(HTTP_Unauthorized, "Needed admin privileges")
-        return
-    #ignore input data
-    if network_id=='all':
-        where_={}
-    else:
-        where_={"uuid": network_id}
-    result, content = my.db.get_table(SELECT=("uuid","type"), WHERE=where_, FROM='nets')
-    if result < 0:
-        bottle.abort(-result, content)
-        return
-    
-    for net in content:
-        if net["type"]!="ptp" and net["type"]!="data":
-            result-=1
-            continue
-        r,c = config_dic['of_thread'].insert_task("update-net", net['uuid'])
-        if r  < 0:
-            print "http_put_openflow_id error while launching openflow rules"
-            bottle.abort(HTTP_Internal_Server_Error, c)
-    data={'result' : str(result)+" nets updates"}
+
+    if network_id == 'all':
+        network_id = None
+
+    try:
+        result = my.ovim.update_openflow_rules(network_id)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+    data = {'result': str(result) + " nets updates"}
     return format_out(data)
 
-@bottle.route(url_base + '/networks/openflow/clear', method='DELETE')
+
 @bottle.route(url_base + '/networks/clear/openflow', method='DELETE')
 def http_clear_openflow_rules():
-    '''To make actions over the net. The action is to delete ALL openflow rules
-    '''
-    my = config_dic['http_threads'][ threading.current_thread().name ]
+    """
+    To make actions over the net. The action is to delete ALL openflow rules
+    :return:
+    """
+    my = config_dic['http_threads'][ threading.current_thread().name]
+
     if not my.admin:
         bottle.abort(HTTP_Unauthorized, "Needed admin privileges")
-        return
-    #ignore input data
-    r,c = config_dic['of_thread'].insert_task("clear-all")
-    if r  < 0:
-        print "http_delete_openflow_id error while launching openflow rules"
-        bottle.abort(HTTP_Internal_Server_Error, c)
-        return
+    try:
+        my.ovim.clear_openflow_rules()
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
-    data={'result' : " Clearing openflow rules in process"}
+    data = {'result': " Clearing openflow rules in process"}
     return format_out(data)
+
 
 @bottle.route(url_base + '/networks/openflow/ports', method='GET')
 def http_get_openflow_ports():
-    '''Obtain switch ports names of openflow controller
-    '''
-    data={'ports' : config_dic['of_thread'].OF_connector.pp2ofi}
+    """
+    Obtain switch ports names of openflow controller
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+    ports = my.ovim.get_openflow_ports()
+    data = {'ports': ports}
     return format_out(data)
-
-
 #
 # PORTS
 #
+
 
 @bottle.route(url_base + '/ports', method='GET')
 def http_get_ports():
