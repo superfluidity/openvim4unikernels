@@ -92,7 +92,6 @@ class ovim():
         self.db = None
         self.db =   self._create_database_connection()
 
-
     def _create_database_connection(self):
         db = vim_db.vim_db((self.config["network_vlan_range_start"], self.config["network_vlan_range_end"]),
                            self.config['log_level_db']);
@@ -105,6 +104,40 @@ class ovim():
                                                                                 self.config['db_host']) )
         return db
 
+    @staticmethod
+    def _check_dhcp_data_integrity(network):
+        """
+        Check if all dhcp parameter for anet are valid, if not will be calculated from cidr value
+        :param network: list with user nets paramters
+        :return:
+        """
+        if "cidr" in network:
+            cidr = network["cidr"]
+            ip_tools = IPNetwork(cidr)
+            cidr_len = ip_tools.prefixlen
+            if cidr_len > 29:
+                return False
+
+            ips = IPNetwork(cidr)
+            if "dhcp_first_ip" not in network:
+                network["dhcp_first_ip"] = str(ips[2])
+            if "dhcp_last_ip" not in network:
+                network["dhcp_last_ip"] = str(ips[-2])
+            if "gateway_ip" not in network:
+                network["gateway_ip"] = str(ips[1])
+
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def _check_valid_uuid(uuid):
+        id_schema = {"type": "string", "pattern": "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$"}
+        try:
+            js_v(uuid, id_schema)
+            return True
+        except js_e.ValidationError:
+            return False
 
     def start_service(self):
         #if self.running_info:
@@ -239,8 +272,8 @@ class ovim():
 
         for net in content:
             net_type = net['type']
-            if net_type == 'bridge_data' or net_type == 'bridge_man' \
-                    and net["provider"][:4] =="OVS:" and net["enable_dhcp"] == "true":
+            if (net_type == 'bridge_data' or net_type == 'bridge_man') \
+                    and net["provider"][:4] == 'OVS:' and net["enable_dhcp"] == "true":
                     self.launch_dhcp_server(net['vlan'],
                                             net['dhcp_first_ip'],
                                             net['dhcp_last_ip'],
@@ -259,15 +292,15 @@ class ovim():
         for thread in threads.values():
             thread.join()
 
-    def get_networks(self, select_=None, where_=None, limit_=100):
+    def get_networks(self, columns=None, filter={}, limit=None):
         """
         Retreive networks available
-        :param select_: List with select query parameters
-        :param where_: List with where query parameters
-        :param limit_: Query limit result
+        :param columns: List with select query parameters
+        :param filter: List with where query parameters
+        :param limit: Query limit result
         :return:
         """
-        result, content = self.db.get_table(SELECT=select_, FROM='nets', WHERE=where_, LIMIT=limit_)
+        result, content = self.db.get_table(SELECT=columns, FROM='nets', WHERE=filter, LIMIT=limit)
 
         if result < 0:
             raise ovimException(str(content), -result)
@@ -276,36 +309,39 @@ class ovim():
 
         return content
 
-    def get_network_by_id(self, where_, limit_=100):
+    def show_network(self, network_id, filter={}):
         """
-
-        :param where_:
-        :param limit_:
+        Get network from DB by id
+        :param network_id: net Id
+        :param filter:
+        :param limit:
         :return:
         """
         # obtain data
-        if 'uuid' not in where_:
-            raise ovimException("Not network id was not found" )
-        result, content = self.db.get_table(FROM='nets', WHERE=where_, LIMIT=limit_)
+        if not network_id:
+            raise ovimException("Not network id was not found")
+        filter['uuid'] = network_id
 
-        network_id = where_['uuid']
+        result, content = self.db.get_table(FROM='nets', WHERE=filter, LIMIT=100)
 
         if result < 0:
             raise ovimException(str(content), -result)
         elif result == 0:
-            raise ovimException("http_get_networks_id network '%s' not found" % network_id, -result)
+            raise ovimException("show_network network '%s' not found" % network_id, -result)
         else:
             convert_boolean(content, ('shared', 'admin_state_up', 'enable_dhcp'))
-            # get ports
+            # get ports from DB
             result, ports = self.db.get_table(FROM='ports', SELECT=('uuid as port_id',),
-                                            WHERE={'net_id': network_id}, LIMIT=100)
+                                              WHERE={'net_id': network_id}, LIMIT=100)
             if len(ports) > 0:
                 content[0]['ports'] = ports
-            return content
 
-    def set_network(self, network):
+            convert_boolean(content, ('shared', 'admin_state_up', 'enable_dhcp'))
+            return content[0]
+
+    def new_network(self, network):
         """
-
+        Create a net in DB
         :return:
         """
         tenant_id = network.get('tenant_id')
@@ -319,10 +355,6 @@ class ovim():
         # check valid params
         net_provider = network.get('provider')
         net_type = network.get('type')
-        net_enable_dhcp = network.get('enable_dhcp')
-        if net_enable_dhcp:
-            net_cidr = network.get('cidr')
-
         net_vlan = network.get("vlan")
         net_bind_net = network.get("bind_net")
         net_bind_type = network.get("bind_type")
@@ -393,9 +425,11 @@ class ovim():
                         bridge_net = brnet
                         net_vlan = brnet[1]
                         break
-                        #            if bridge_net==None:
-                        #                bottle.abort(HTTP_Bad_Request, "invalid 'provider:physical', bridge '%s' is not one of the provisioned 'bridge_ifaces' in the configuration file" % bridge_net_name)
-                        #                return
+                        # if bridge_net==None:
+                        #    bottle.abort(HTTP_Bad_Request, "invalid 'provider:physical', bridge '%s' is not one of the
+                        #                    provisioned 'bridge_ifaces' in the configuration file" % bridge_net_name)
+                        #    return
+
         elif self.config['network_type'] == 'bridge' and (net_type == 'bridge_data' or net_type == 'bridge_man'):
             # look for a free precreated nets
             for brnet in self.config['bridge_nets']:
@@ -414,7 +448,7 @@ class ovim():
                 raise ovimException("Max limits of bridge networks reached. Future versions of VIM "
                                     "will overcome this limit", HTTP_Bad_Request)
             else:
-                print "using net", bridge_net
+                self.logger.debug("using net " + bridge_net)
                 net_provider = "bridge:" + bridge_net[0]
                 net_vlan = bridge_net[1]
         elif net_type == 'bridge_data' or net_type == 'bridge_man' and self.config['network_type'] == 'ovs':
@@ -441,51 +475,115 @@ class ovim():
             if self.config.get("dhcp_server") and self.config['network_type'] == 'bridge':
                 if network["name"] in self.config["dhcp_server"].get("nets", ()):
                     self.config["dhcp_nets"].append(content)
-                    print "dhcp_server: add new net", content
+                    self.logger.debug("dhcp_server: add new net", content)
                 elif not bridge_net and bridge_net[0] in self.config["dhcp_server"].get("bridge_ifaces", ()):
                     self.config["dhcp_nets"].append(content)
-                    print "dhcp_server: add new net", content
+                    self.logger.debug("dhcp_server: add new net", content, content)
             return content
         else:
-            print "http_post_networks error %d %s" % (result, content)
             raise ovimException("Error posting network", HTTP_Internal_Server_Error)
+# TODO kei change update->edit
 
-    @staticmethod
-    def _check_dhcp_data_integrity(network):
+    def edit_network(self, network_id, network):
         """
-        Check if all dhcp parameter for anet are valid, if not will be calculated from cidr value
-        :param network: list with user nets paramters
+        Update entwork data byt id
         :return:
         """
-        control_iface = []
+        # Look for the previous data
+        where_ = {'uuid': network_id}
+        result, network_old = self.db.get_table(FROM='nets', WHERE=where_)
+        if result < 0:
+            raise ovimException("Error updating network %s" % network_old, HTTP_Internal_Server_Error)
+        elif result == 0:
+            raise ovimException('network %s not found' % network_id, HTTP_Not_Found)
+        # get ports
+        nbports, content = self.db.get_table(FROM='ports', SELECT=('uuid as port_id',),
+                                             WHERE={'net_id': network_id}, LIMIT=100)
+        if result < 0:
+            raise ovimException("http_put_network_id error %d %s" % (result, network_old), HTTP_Internal_Server_Error)
+        if nbports > 0:
+            if 'type' in network and network['type'] != network_old[0]['type']:
+                raise ovimException("Can not change type of network while having ports attached",
+                                    HTTP_Method_Not_Allowed)
+            if 'vlan' in network and network['vlan'] != network_old[0]['vlan']:
+                raise ovimException("Can not change vlan of network while having ports attached",
+                                    HTTP_Method_Not_Allowed)
 
-        if "cidr" in network:
-            cidr = network["cidr"]
-            ip_tools = IPNetwork(cidr)
-            cidr_len = ip_tools.prefixlen
-            if cidr_len > 29:
-                return False
+        # check valid params
+        net_provider = network.get('provider', network_old[0]['provider'])
+        net_type = network.get('type', network_old[0]['type'])
+        net_bind_net = network.get("bind_net")
+        net_bind_type = network.get("bind_type")
+        if net_bind_net:
+            # look for a valid net
+            if self._check_valid_uuid(net_bind_net):
+                net_bind_key = "uuid"
+            else:
+                net_bind_key = "name"
+            result, content = self.db.get_table(FROM='nets', WHERE={net_bind_key: net_bind_net})
+            if result < 0:
+                raise ovimException('Getting nets from db ' + content, HTTP_Internal_Server_Error)
+            elif result == 0:
+                raise ovimException("bind_net %s '%s'not found" % (net_bind_key, net_bind_net), HTTP_Bad_Request)
+            elif result > 1:
+                raise ovimException("More than one bind_net %s '%s' found, use uuid" % (net_bind_key, net_bind_net),
+                                    HTTP_Bad_Request)
+            network["bind_net"] = content[0]["uuid"]
+        if net_bind_type:
+            if net_bind_type[0:5] != "vlan:":
+                raise ovimException("Bad format for 'bind_type', must be 'vlan:<tag>'", HTTP_Bad_Request)
+            if int(net_bind_type[5:]) > 4095 or int(net_bind_type[5:]) <= 0:
+                raise ovimException("bad format for 'bind_type', must be 'vlan:<tag>' with a tag between 1 and 4095",
+                                    HTTP_Bad_Request)
+        if net_provider:
+            if net_provider[:9] == "openflow:":
+                if net_type != "ptp" and net_type != "data":
+                    raise ovimException("Only 'ptp' or 'data' net types can be bound to 'openflow'", HTTP_Bad_Request)
+            else:
+                if net_type != "bridge_man" and net_type != "bridge_data":
+                    raise ovimException("Only 'bridge_man' or 'bridge_data' net types can be bound to "
+                                        "'bridge', 'macvtap' or 'default", HTTP_Bad_Request)
 
-            ips = IPNetwork(cidr)
-            if "dhcp_first_ip" not in network:
-                network["dhcp_first_ip"] = str(ips[2])
-            if "dhcp_last_ip" not in network:
-                network["dhcp_last_ip"] = str(ips[-2])
-            if "gateway_ip" not in network:
-                network["gateway_ip"] = str(ips[1])
-
-            return True
+        # insert in data base
+        result, content = self.db.update_rows('nets', network, WHERE={'uuid': network_id}, log=True)
+        if result >= 0:
+            # if result > 0 and nbports>0 and 'admin_state_up' in network
+            #     and network['admin_state_up'] != network_old[0]['admin_state_up']:
+            if result > 0:
+                r, c = self.config['of_thread'].insert_task("update-net", network_id)
+                if r < 0:
+                    raise ovimException("Error while launching openflow rules %s" % c, HTTP_Internal_Server_Error)
+                if self.config.get("dhcp_server"):
+                    if network_id in self.config["dhcp_nets"]:
+                        self.config["dhcp_nets"].remove(network_id)
+                    if network.get("name", network_old["name"]) in self.config["dhcp_server"].get("nets", ()):
+                        self.config["dhcp_nets"].append(network_id)
+                    else:
+                        net_bind = network.get("bind", network_old["bind"])
+                        if net_bind and net_bind[:7] == "bridge:" and net_bind[7:] in self.config["dhcp_server"].get(
+                                "bridge_ifaces", ()):
+                            self.config["dhcp_nets"].append(network_id)
+            return network_id
         else:
-            return False
+            raise ovimException(content, -result)
 
-    @staticmethod
-    def _check_valid_uuid( uuid):
-        id_schema = {"type": "string", "pattern": "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$"}
-        try:
-            js_v(uuid, id_schema)
-            return True
-        except js_e.ValidationError:
-            return False
+    def delete_network(self, network_id):
+
+        # delete from the data base
+        result, content = self.db.delete_row('nets', network_id)
+
+        if result == 0:
+            raise ovimException("Network %s not found " % network_id, HTTP_Not_Found)
+        elif result > 0:
+            for brnet in self.config['bridge_nets']:
+                if brnet[3] == network_id:
+                    brnet[3] = None
+                    break
+            if self.config.get("dhcp_server") and network_id in self.config["dhcp_nets"]:
+                self.config["dhcp_nets"].remove(network_id)
+            return content
+        else:
+            raise ovimException("Error deleting  network %s" % network_id, HTTP_Internal_Server_Error)
 
     def get_openflow_rules(self, network_id=None):
         """
@@ -507,7 +605,7 @@ class ovim():
             raise ovimException(str(content), -result)
         return content
 
-    def update_openflow_rules(self, network_id=None):
+    def edit_openflow_rules(self, network_id=None):
 
         """
         To make actions over the net. The action is to reinstall the openflow rules
@@ -535,7 +633,7 @@ class ovim():
                 raise ovimException(str(c), -r)
         return result
 
-    def clear_openflow_rules(self):
+    def delete_openflow_rules(self):
         """
         To make actions over the net. The action is to delete ALL openflow rules
         :return: return operation result
@@ -602,7 +700,6 @@ class ovim():
             if r < 0:
                 self.logger.error("Cannot insert a task for updating network '$s' %s", network, c)
         return content
-
 
     def edit_port(self, port_id, port_data, admin=True):
         # Look for the previous port data
@@ -701,6 +798,7 @@ class ovim():
         :param first_ip: First dhcp range ip
         :param last_ip: Last dhcp range ip
         :param cidr: net cidr
+        :param gateway: net gateway
         :return:
         """
         ip_tools = IPNetwork(cidr)
