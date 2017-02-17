@@ -179,8 +179,8 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 5001 ] && DATABASE_TARGET_VER_NUM=9   #0.5.1   =>  9
 [ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=10  #0.5.2   => 10
 [ $OPENVIM_VER_NUM -ge 5004 ] && DATABASE_TARGET_VER_NUM=11  #0.5.4   => 11
+[ $OPENVIM_VER_NUM -ge 5005 ] && DATABASE_TARGET_VER_NUM=12  #0.5.5   => 12
 #TODO ... put next versions here
-
 
 function upgrade_to_1(){
     echo "    upgrade database from version 0.0 to version 0.1"
@@ -495,14 +495,44 @@ function downgrade_from_11(){
     echo "ALTER TABLE nets DROP COLUMN gateway_ip;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '11';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
+function upgrade_to_12(){
+    echo "    upgrade database from version 0.11 to version 0.12"
+    echo "    Create of_controller table "
+    echo "CREATE TABLE ofcs (
+	uuid VARCHAR(36) NOT NULL,
+	name VARCHAR(255) NOT NULL,
+	dpid VARCHAR(64) NOT NULL,
+	ip VARCHAR(64) NOT NULL,
+	port INT(5) NOT NULL,
+	type VARCHAR(64) NOT NULL,
+	version VARCHAR(12) NULL DEFAULT NULL,
+	user VARCHAR(64) NULL DEFAULT NULL,
+	password VARCHAR(64) NULL DEFAULT NULL,
+	PRIMARY KEY (uuid)
+)
+COLLATE='utf8_general_ci'
+ENGINE=InnoDB;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "    Modify user_at for uuids table"
+    echo "ALTER TABLE uuids  CHANGE COLUMN used_at used_at VARCHAR(64) NULL DEFAULT NULL COMMENT 'Table that uses this UUID' ;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (12, '0.12', '0.5.5', 'Add of_controller table', '2017-02-17');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_12(){
+    echo "    downgrade database from version 0.12 to version 0.11"
+    echo "    Delete ofcs table"
+    echo "DROP TABLE ofcs;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE uuids  CHANGE COLUMN used_at used_at ENUM('flavors', 'hosts', 'images', 'instances', 'nets', 'ports', 'tenants') NULL DEFAULT NULL COMMENT 'Table that uses this UUID' ;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '12';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
 #TODO ... put funtions here
 
-
+echo "db version = "${DATABASE_VER_NUM}
 [ $DATABASE_TARGET_VER_NUM -eq $DATABASE_VER_NUM ] && echo "    current database version $DATABASE_VER is ok"
 #UPGRADE DATABASE step by step
 while [ $DATABASE_TARGET_VER_NUM -gt $DATABASE_VER_NUM ]
 do
     DATABASE_VER_NUM=$((DATABASE_VER_NUM+1))
+
     upgrade_to_${DATABASE_VER_NUM}
     #FILE_="${DIRNAME}/upgrade_to_${DATABASE_VER_NUM}.sh"
     #[ ! -x "$FILE_" ] && echo "Error, can not find script '$FILE_' to upgrade" >&2 && exit -1

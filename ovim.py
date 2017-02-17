@@ -292,15 +292,15 @@ class ovim():
         for thread in threads.values():
             thread.join()
 
-    def get_networks(self, columns=None, filter={}, limit=None):
+    def get_networks(self, columns=None, db_filter={}, limit=None):
         """
         Retreive networks available
         :param columns: List with select query parameters
-        :param filter: List with where query parameters
+        :param db_filter: List with where query parameters
         :param limit: Query limit result
         :return:
         """
-        result, content = self.db.get_table(SELECT=columns, FROM='nets', WHERE=filter, LIMIT=limit)
+        result, content = self.db.get_table(SELECT=columns, FROM='nets', WHERE=db_filter, LIMIT=limit)
 
         if result < 0:
             raise ovimException(str(content), -result)
@@ -309,20 +309,19 @@ class ovim():
 
         return content
 
-    def show_network(self, network_id, filter={}):
+    def show_network(self, network_id, db_filter={}):
         """
         Get network from DB by id
         :param network_id: net Id
-        :param filter:
-        :param limit:
+        :param db_filter: List with where query parameters
         :return:
         """
         # obtain data
         if not network_id:
             raise ovimException("Not network id was not found")
-        filter['uuid'] = network_id
+        db_filter['uuid'] = network_id
 
-        result, content = self.db.get_table(FROM='nets', WHERE=filter, LIMIT=100)
+        result, content = self.db.get_table(FROM='nets', WHERE=db_filter, LIMIT=100)
 
         if result < 0:
             raise ovimException(str(content), -result)
@@ -568,6 +567,11 @@ class ovim():
             raise ovimException(content, -result)
 
     def delete_network(self, network_id):
+        """
+        Delete network by network id
+        :param network_id:  network id
+        :return:
+        """
 
         # delete from the data base
         result, content = self.db.delete_row('nets', network_id)
@@ -762,6 +766,84 @@ class ovim():
             return port_id
         else:
             raise ovimException("Error {}".format(content), http_code=-result)
+
+    def new_of_controller(self, ofc_data):
+        """
+        Create a new openflow controller into DB
+        :param ofc_data: Dict openflow controller data
+        :return: openflow controller dpid
+        """
+
+        result, content = self.db.new_row('ofcs', ofc_data, True, True)
+        if result < 0:
+            raise ovimException("New ofc Error %s" % content, HTTP_Internal_Server_Error)
+        return content
+
+    def edit_of_controller(self, of_id, ofc_data):
+        """
+        Edit an openflow controller entry from DB
+        :return:
+        """
+        if not ofc_data:
+            raise ovimException("No data received during uptade OF contorller", http_code=HTTP_Internal_Server_Error)
+
+        old_of_controller = self.show_of_controller(of_id)
+
+        if old_of_controller:
+            result, content = self.db.update_rows('ofcs', ofc_data, WHERE={'uuid': of_id}, log=False)
+            if result >= 0:
+                return ofc_data
+            else:
+                raise ovimException("Error uptating OF contorller with uuid {}".format(of_id),
+                                    http_code=-result)
+        else:
+            raise ovimException("Error uptating OF contorller with uuid {}".format(of_id),
+                                http_code=HTTP_Internal_Server_Error)
+
+    def delete_of_controller(self, of_id):
+        """
+        Delete an openflow controller from DB.
+        :param of_id: openflow controller dpid
+        :return:
+        """
+
+        result, content = self.db.delete_row_by_key("ofcs", "uuid", of_id)
+        if result < 0:
+            raise ovimException("Cannot delete ofc from database: {}".format(content), http_code=-result)
+        elif result == 0:
+            raise ovimException("ofc {} not found ".format(content), http_code=HTTP_Not_Found)
+        return content
+
+    def show_of_controller(self, uuid):
+        """
+        Show an openflow controller by dpid from DB.
+        :param db_filter: List with where query parameters
+        :return:
+        """
+
+        result, content = self.db.get_table(FROM='ofcs', WHERE={"uuid": uuid}, LIMIT=100)
+
+        if result == 0:
+            raise ovimException("Openflow controller with uuid '{}' not found".format(uuid),
+                                http_code=HTTP_Not_Found)
+        elif result < 0:
+            raise ovimException("Openflow controller with uuid '{}' error".format(uuid),
+                                http_code=HTTP_Internal_Server_Error)
+        return content
+
+    def get_of_controllers(self, columns=None, db_filter={}):
+        """
+        Show an openflow controllers from DB.
+        :param columns:  List with SELECT query parameters
+        :param db_filter: List with where query parameters
+        :return:
+        """
+        result, content = self.db.get_table(SELECT=columns, FROM='ofcs', WHERE=db_filter, LIMIT=100)
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+
+        return content
 
     def get_dhcp_controller(self):
         """

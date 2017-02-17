@@ -47,7 +47,7 @@ from vim_schema import host_new_schema, host_edit_schema, tenant_new_schema, \
     flavor_new_schema, flavor_update_schema, \
     image_new_schema, image_update_schema, \
     server_new_schema, server_action_schema, network_new_schema, network_update_schema, \
-    port_new_schema, port_update_schema
+    port_new_schema, port_update_schema, openflow_controller_schema
 import ovim
 import logging
 
@@ -153,6 +153,7 @@ http2db_flavor={'id':'uuid','imageRef':'image_id'}
 http2db_image={'id':'uuid', 'created':'created_at', 'updated':'modified_at', 'public': 'public'}
 http2db_server={'id':'uuid','hostId':'host_id','flavorRef':'flavor_id','imageRef':'image_id','created':'created_at'}
 http2db_network={'id':'uuid','provider:vlan':'vlan', 'provider:physical': 'provider'}
+http2db_ofc = {'id': 'uuid'}
 http2db_port={'id':'uuid', 'network_id':'net_id', 'mac_address':'mac', 'device_owner':'type','device_id':'instance_id','binding:switch_port':'switch_port','binding:vlan':'vlan', 'bandwidth':'Mbps'}
 
 def remove_extra_items(data, schema):
@@ -1980,6 +1981,127 @@ def http_delete_network_id(network_id):
 #
 # OPENFLOW
 #
+
+
+@bottle.route(url_base + '/openflow/controller', method='GET')
+def http_get_openflow_controller():
+    """
+    Retrieve a openflow controllers list from DB.
+    :return:
+    """
+    # TODO check if show a proper list
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        select_, where_, limit_ = filter_query_string(bottle.request.query, http2db_ofc,
+                                                      ('id', 'name', 'dpid', 'ip', 'port', 'type',
+                                                       'version', 'user', 'password'))
+
+        content = my.ovim.get_of_controllers(select_, where_)
+        delete_nulls(content)
+        change_keys_http2db(content, http2db_ofc, reverse=True)
+        data = {'ofcs': content}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+
+@bottle.route(url_base + '/openflow/controller/<uuid>', method='GET')
+def http_get_openflow_controller_id(uuid):
+    """
+    Get an openflow controller by dpid from DB.get_of_controllers
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+
+        content = my.ovim.show_of_controller(uuid)
+        delete_nulls(content)
+        change_keys_http2db(content, http2db_ofc, reverse=True)
+        data = {'ofc': content}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+
+@bottle.route(url_base + '/openflow/controller/', method='POST')
+def http_post_openflow_controller():
+    """
+    Create a new openflow controller into DB
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        http_content = format_in(openflow_controller_schema)
+        of_c = http_content['ofc']
+        uuid = my.ovim.new_of_controller(of_c)
+        content = my.ovim.show_of_controller(uuid)
+        delete_nulls(content)
+        change_keys_http2db(content, http2db_ofc, reverse=True)
+        data = {'ofc': content}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+
+@bottle.route(url_base + '/openflow/controller/<of_controller_id>', method='PUT')
+def http_put_openflow_controller_by_id(of_controller_id):
+    """
+    Create an openflow controller into DB
+    :param of_controller_id: openflow controller dpid
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        http_content = format_in(openflow_controller_schema)
+        of_c = http_content['ofc']
+
+        content = my.ovim.edit_of_controller(of_controller_id, of_c)
+        delete_nulls(content)
+        change_keys_http2db(content, http2db_ofc, reverse=True)
+        data = {'ofc': content}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+
+@bottle.route(url_base + '/openflow/controller/<of_controller_id>', method='DELETE')
+def http_delete_openflow_controller(of_controller_id):
+    """
+    Delete  an openflow controller from DB.
+    :param of_controller_id: openflow controller dpid
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        content = my.ovim.delete_of_controller(of_controller_id)
+        data = {'result': content}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
 
 @bottle.route(url_base + '/networks/<network_id>/openflow', method='GET')

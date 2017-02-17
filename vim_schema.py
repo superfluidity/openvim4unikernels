@@ -147,8 +147,6 @@ metadata_schema={
     }
 }
 
-
-
 tenant_new_schema = {
     "title":"tenant creation information schema",
     "$schema": "http://json-schema.org/draft-04/schema#",
@@ -613,6 +611,7 @@ network_new_schema = {
     "required": ["network"],
     "additionalProperties": False
 }
+
 network_update_schema = {
     "title":"network update information schema",
     "$schema": "http://json-schema.org/draft-04/schema#",
@@ -714,4 +713,28 @@ hostinfo_schema = {
         }
     },
     "required": ["iface_names"]
+}
+
+openflow_controller_schema = {
+    "title": "network creation information schema",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "properties": {
+        "ofc": {
+            "type": "object",
+            "properties": {
+                "name": name_schema,
+                "dpid": nameshort_schema,
+                "ip": nameshort_schema,
+                "port": port_schema,
+                "type": nameshort_schema,
+                "version": nametiny_schema,
+                "user": nameshort_schema,
+                "password": nameshort_schema
+            },
+            "required": ["dpid", "type", "ip", "port", "name"]
+        }
+    },
+    "required": ["ofc"],
+    "additionalProperties": False
 }
