@@ -212,6 +212,7 @@ class OF_conn():
                 return r, c
         # get rules
         try:
+	    self.headers['content-type'] = 'text/plain'
             of_response = requests.get(self.url + "flows/" + self.id, headers=self.headers)
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
 
