@@ -861,113 +861,139 @@ def http_delete_host_id(host_id):
         print "http_delete_host_id error",result, content
         bottle.abort(-result, content)
         return
-
-
-
 #
 # TENANTS
 #
 
+
 @bottle.route(url_base + '/tenants', method='GET')
 def http_get_tenants():
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    select_,where_,limit_ = filter_query_string(bottle.request.query, http2db_tenant,
-            ('id','name','description','enabled') )
-    result, content = my.db.get_table(FROM='tenants', SELECT=select_,WHERE=where_,LIMIT=limit_)
-    if result < 0:
-        print "http_get_tenants Error", content
-        bottle.abort(-result, content)
-    else:
-        change_keys_http2db(content, http2db_tenant, reverse=True)
-        convert_boolean(content, ('enabled',))
-        data={'tenants' : content}
-        #data['tenants_links'] = dict([('tenant', row['id']) for row in content])
+    """
+    Retreive tenant list from DB
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        select_, where_, limit_ = filter_query_string(bottle.request.query, http2db_tenant,
+                                                      ('id', 'name', 'description', 'enabled'))
+        tenants = my.ovim.get_tenants(select_, where_)
+        delete_nulls(tenants)
+        change_keys_http2db(tenants, http2db_tenant, reverse=True)
+        data = {'tenants': tenants}
         return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
 
 @bottle.route(url_base + '/tenants/<tenant_id>', method='GET')
 def http_get_tenant_id(tenant_id):
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    result, content = my.db.get_table(FROM='tenants', SELECT=('uuid','name','description', 'enabled'),WHERE={'uuid': tenant_id} )
-    if result < 0:
-        print "http_get_tenant_id error %d %s" % (result, content)
-        bottle.abort(-result, content)
-    elif result==0:
-        print "http_get_tenant_id tenant '%s' not found" % tenant_id
-        bottle.abort(HTTP_Not_Found, "tenant %s not found" % tenant_id)
-    else:
-        change_keys_http2db(content, http2db_tenant, reverse=True)
-        convert_boolean(content, ('enabled',))
-        data={'tenant' : content[0]}
-        #data['tenants_links'] = dict([('tenant', row['id']) for row in content])
+    """
+    Get tenant from DB by id
+    :param tenant_id: tenant id
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        tenant = my.ovim.show_tenant_id(tenant_id)
+        delete_nulls(tenant)
+        change_keys_http2db(tenant, http2db_tenant, reverse=True)
+        data = {'tenant': tenant}
         return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 
 
 @bottle.route(url_base + '/tenants', method='POST')
 def http_post_tenants():
-    '''insert a tenant into the database.'''
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #parse input data
-    http_content = format_in( tenant_new_schema )
-    r = remove_extra_items(http_content, tenant_new_schema)
-    if r is not None: print "http_post_tenants: Warning: remove extra items ", r
-    change_keys_http2db(http_content['tenant'], http2db_tenant)
+    """
+    Insert a tenant into the database.
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
 
-    #insert in data base
-    result, content = my.db.new_tenant(http_content['tenant'])
-            
-    if result >= 0:
-        return http_get_tenant_id(content)
-    else:
-        bottle.abort(-result, content)
-        return
+    try:
+        http_content = format_in(tenant_new_schema)
+        r = remove_extra_items(http_content, tenant_new_schema)
+        if r is not None:
+            my.logger.error("http_post_tenants: Warning: remove extra items " + str(r), exc_info=True)
+        # insert in data base
+        tenant_id = my.ovim.new_tentant(http_content['tenant'])
+        tenant = my.ovim.show_tenant_id(tenant_id)
+        change_keys_http2db(tenant, http2db_tenant, reverse=True)
+        delete_nulls(tenant)
+        data = {'tenant': tenant}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
     
 @bottle.route(url_base + '/tenants/<tenant_id>', method='PUT')
 def http_put_tenant_id(tenant_id):
-    '''update a tenant into the database.'''
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #parse input data
-    http_content = format_in( tenant_edit_schema )
-    r = remove_extra_items(http_content, tenant_edit_schema)
-    if r is not None: print "http_put_tenant_id: Warning: remove extra items ", r
-    change_keys_http2db(http_content['tenant'], http2db_tenant)
+    """
+    Update a tenantinto DB.
+    :param tenant_id: tentant id
+    :return:
+    """
 
-    #insert in data base
-    result, content = my.db.update_rows('tenants', http_content['tenant'], WHERE={'uuid': tenant_id}, log=True )
-    if result >= 0:
-        return http_get_tenant_id(tenant_id)
-    else:
-        bottle.abort(-result, content)
-        return
+    my = config_dic['http_threads'][threading.current_thread().name]
+    try:
+        # parse input data
+        http_content = format_in(tenant_edit_schema)
+        r = remove_extra_items(http_content, tenant_edit_schema)
+        if r is not None:
+            print "http_put_tenant_id: Warning: remove extra items ", r
+        change_keys_http2db(http_content['tenant'], http2db_tenant)
+        # insert in data base
+        my.ovim.edit_tenant(tenant_id, http_content['tenant'])
+        tenant = my.ovim.show_tenant_id(tenant_id)
+        change_keys_http2db(tenant, http2db_tenant, reverse=True)
+        data = {'tenant': tenant}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
 
 @bottle.route(url_base + '/tenants/<tenant_id>', method='DELETE')
 def http_delete_tenant_id(tenant_id):
-    my = config_dic['http_threads'][ threading.current_thread().name ]
-    #check permissions
-    r, tenants_flavors = my.db.get_table(FROM='tenants_flavors', SELECT=('flavor_id','tenant_id'), WHERE={'tenant_id': tenant_id})
-    if r<=0:
-        tenants_flavors=()
-    r, tenants_images  = my.db.get_table(FROM='tenants_images',  SELECT=('image_id','tenant_id'),  WHERE={'tenant_id': tenant_id})
-    if r<=0:
-        tenants_images=()
-    result, content = my.db.delete_row('tenants', tenant_id)
-    if result == 0:
-        bottle.abort(HTTP_Not_Found, content)
-    elif result >0:
-        print "alf", tenants_flavors, tenants_images
-        for flavor in tenants_flavors:
-            my.db.delete_row_by_key("flavors", "uuid",  flavor['flavor_id'])
-        for image in tenants_images:
-            my.db.delete_row_by_key("images", "uuid",   image['image_id'])
-        data={'result' : content}
-        return format_out(data)
-    else:
-        print "http_delete_tenant_id error",result, content
-        bottle.abort(-result, content)
-        return
+    """
+    Delete a tenant from the database.
+    :param tenant_id: tenant id
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
 
+    try:
+        content = my.ovim.delete_tentant(tenant_id)
+        data = {'result': content}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
 #
 # FLAVORS
 #
+
 
 @bottle.route(url_base + '/<tenant_id>/flavors', method='GET')
 def http_get_flavors(tenant_id):

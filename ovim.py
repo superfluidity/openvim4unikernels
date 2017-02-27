@@ -831,19 +831,118 @@ class ovim():
                                 http_code=HTTP_Internal_Server_Error)
         return content
 
-    def get_of_controllers(self, columns=None, db_filter={}):
+    def get_of_controllers(self, columns=None, db_filter={}, limit=None):
         """
         Show an openflow controllers from DB.
         :param columns:  List with SELECT query parameters
         :param db_filter: List with where query parameters
+        :param limit: result Limit
         :return:
         """
-        result, content = self.db.get_table(SELECT=columns, FROM='ofcs', WHERE=db_filter, LIMIT=100)
+        result, content = self.db.get_table(SELECT=columns, FROM='ofcs', WHERE=db_filter, LIMIT=limit)
 
         if result < 0:
             raise ovimException(str(content), -result)
 
         return content
+
+    def get_tenants(self, columns=None, db_filter={}, limit=None):
+        """
+        Retrieve tenant list from DB
+        :param columns:  List with SELECT query parameters
+        :param db_filter: List with where query parameters
+        :param limit: result limit
+        :return:
+        """
+        result, content = self.db.get_table(FROM='tenants', SELECT=columns, WHERE=db_filter, LIMIT=limit)
+        if result < 0:
+            raise ovimException('get_tenatns Error {}'.format(str(content)), -result)
+        else:
+            convert_boolean(content, ('enabled',))
+            return content
+
+    def show_tenant_id(self, tenant_id):
+        """
+        Get tenant from DB by id
+        :param tenant_id: tenant id
+        :return:
+        """
+        result, content = self.db.get_table(FROM='tenants', SELECT=('uuid', 'name', 'description', 'enabled'),
+                                            WHERE={"uuid": tenant_id})
+        if result < 0:
+            raise ovimException(str(content), -result)
+        elif result == 0:
+            raise ovimException("tenant with uuid='{}' not found".format(tenant_id), HTTP_Not_Found)
+        else:
+            convert_boolean(content, ('enabled',))
+            return content[0]
+
+    def new_tentant(self, tenant):
+        """
+        Create a tenant and store in DB
+        :param tenant: Dictionary with tenant data
+        :return: the uuid of created tenant. Raise exception upon error
+        """
+
+        # insert in data base
+        result, tenant_uuid = self.db.new_tenant(tenant)
+
+        if result >= 0:
+            return tenant_uuid
+        else:
+            raise ovimException(str(tenant_uuid), -result)
+
+    def delete_tentant(self, tenant_id):
+        """
+        Delete a tenant from the database.
+        :param tenant_id: Tenant id
+        :return: delete tenant id
+        """
+
+        # check permissions
+        r, tenants_flavors = self.db.get_table(FROM='tenants_flavors', SELECT=('flavor_id', 'tenant_id'),
+                                               WHERE={'tenant_id': tenant_id})
+        if r <= 0:
+            tenants_flavors = ()
+        r, tenants_images = self.db.get_table(FROM='tenants_images', SELECT=('image_id', 'tenant_id'),
+                                              WHERE={'tenant_id': tenant_id})
+        if r <= 0:
+            tenants_images = ()
+
+        result, content = self.db.delete_row('tenants', tenant_id)
+        if result == 0:
+            raise ovimException("tenant '%s' not found" % tenant_id, HTTP_Not_Found)
+        elif result > 0:
+            for flavor in tenants_flavors:
+                self.db.delete_row_by_key("flavors", "uuid", flavor['flavor_id'])
+            for image in tenants_images:
+                self.db.delete_row_by_key("images", "uuid", image['image_id'])
+            return content
+        else:
+            raise ovimException("Error deleting tenant '%s' " % tenant_id, HTTP_Internal_Server_Error)
+
+    def edit_tenant(self, tenant_id, tenant_data):
+        """
+        Update a tenant data identified by tenant id
+        :param tenant_id: tenant id
+        :param tenant_data: Dictionary with tenant data
+        :return:
+        """
+
+        # Look for the previous data
+        result, tenant_data_old = self.db.get_table(FROM='tenants', WHERE={'uuid': tenant_id})
+        if result < 0:
+            raise ovimException("Error updating tenant with uuid='{}': {}".format(tenant_id, tenant_data_old),
+                                HTTP_Internal_Server_Error)
+        elif result == 0:
+            raise ovimException("tenant with uuid='{}' not found".format(tenant_id), HTTP_Not_Found)
+
+        # insert in data base
+        result, content = self.db.update_rows('tenants', tenant_data, WHERE={'uuid': tenant_id}, log=True)
+        if result >= 0:
+            return content
+        else:
+            raise ovimException(str(content), -result)
 
     def get_dhcp_controller(self):
         """
