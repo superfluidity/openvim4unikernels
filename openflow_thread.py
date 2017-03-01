@@ -84,16 +84,18 @@ def change_db2of(flow):
     flow['actions'] = actions
 
 
-
 class of_test_connector():
     '''This is a fake openflow connector for testing.
         It does nothing and it is used for running openvim without an openflow controller 
     '''
     def __init__(self, params):
-        self.name = "ofc_test"
-        self.rules={}
+        name = params.get("name", "test-ofc")
+        self.name = name
+        self.dpid = params.get("dpid")
+        self.rules= {}
         self.logger = logging.getLogger('vim.OF.TEST')
-        self.logger.setLevel( getattr(logging, params.get("of_debug", "ERROR") ) )
+        self.logger.setLevel(getattr(logging, params.get("of_debug", "ERROR")))
+
     def get_of_switches(self):
         return 0, ()
     def obtain_port_correspondence(self):
@@ -121,18 +123,18 @@ class of_test_connector():
 
 
 class openflow_thread(threading.Thread):
-    def __init__(self, OF_connector, db, db_lock, of_test, pmp_with_same_vlan, debug='ERROR'):
+    def __init__(self, of_uuid, OF_connector, db, db_lock, of_test, pmp_with_same_vlan=False, debug='ERROR'):
         threading.Thread.__init__(self)
-
+        self.of_uuid = of_uuid
         self.db = db
         self.pmp_with_same_vlan = pmp_with_same_vlan
         self.name = "openflow"
         self.test = of_test
         self.db_lock = db_lock
         self.OF_connector = OF_connector
-        self.logger = logging.getLogger('vim.OF')
+        self.logger = logging.getLogger('vim.OF-' + of_uuid)
         self.logger.setLevel( getattr(logging, debug) )
-
+        self.logger.name = OF_connector.name + " " + self.OF_connector.dpid
         self.queueLock = threading.Lock()
         self.taskQueue = Queue.Queue(2000)
         
@@ -146,6 +148,7 @@ class openflow_thread(threading.Thread):
             return -1, "timeout inserting a task over openflow thread " + self.name
 
     def run(self):
+        self.logger.debug("Start openflow thread")
         while True:
             self.queueLock.acquire()
             if not self.taskQueue.empty():

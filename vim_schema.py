@@ -73,8 +73,8 @@ config_schema = {
         "of_controller_nets_with_same_vlan": {"type" : "boolean"},
         "of_controller": nameshort_schema, #{"type":"string", "enum":["floodlight", "opendaylight"]},
         "of_controller_module": {"type":"string"},
-        #"of_user": nameshort_schema,
-        #"of_password": nameshort_schema,
+        "of_user": nameshort_schema,
+        "of_password": nameshort_schema,
         "test_mode": {"type": "boolean"}, #leave for backward compatibility
         "mode": {"type":"string", "enum":["normal", "host only", "OF only", "development", "test"] },
         "development_bridge": {"type":"string"},
@@ -126,8 +126,7 @@ config_schema = {
     "patternProperties": {
         "of_*" : {"type": ["string", "integer", "boolean"]}
     },
-    "required": ['db_host', 'db_user', 'db_passwd', 'db_name',
-            'of_controller_ip', 'of_controller_port', 'of_controller_dpid', 'of_controller'],
+    "required": ['db_host', 'db_user', 'db_passwd', 'db_name'],
     "additionalProperties": False
 }
 
