@@ -807,7 +807,7 @@ class ovim():
         :return:
         """
 
-        result, content = self.db.delete_row_by_key("ofcs", "uuid", of_id)
+        result, content = self.db.delete_row("ofcs", of_id)
         if result < 0:
             raise ovimException("Cannot delete ofc from database: {}".format(content), http_code=-result)
         elif result == 0:
@@ -829,7 +829,7 @@ class ovim():
         elif result < 0:
             raise ovimException("Openflow controller with uuid '{}' error".format(uuid),
                                 http_code=HTTP_Internal_Server_Error)
-        return content
+        return content[0]
 
     def get_of_controllers(self, columns=None, db_filter={}, limit=None):
         """
