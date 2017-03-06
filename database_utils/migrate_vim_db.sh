@@ -180,6 +180,7 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=10  #0.5.2   => 10
 [ $OPENVIM_VER_NUM -ge 5004 ] && DATABASE_TARGET_VER_NUM=11  #0.5.4   => 11
 [ $OPENVIM_VER_NUM -ge 5005 ] && DATABASE_TARGET_VER_NUM=12  #0.5.5   => 12
+[ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 12
 #TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -523,6 +524,34 @@ function downgrade_from_12(){
     echo "DROP TABLE ofcs;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE uuids  CHANGE COLUMN used_at used_at ENUM('flavors', 'hosts', 'images', 'instances', 'nets', 'ports', 'tenants') NULL DEFAULT NULL COMMENT 'Table that uses this UUID' ;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '12';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+function upgrade_to_13(){
+    echo "    upgrade database from version 0.12 to version 0.13"
+    echo "    Create of_port_mapings table "
+    echo "CREATE TABLE of_port_mappings (
+	uuid VARCHAR(36) NOT NULL,
+	ofc_id VARCHAR(36) NULL DEFAULT NULL,
+	region VARCHAR(64) NULL DEFAULT NULL,
+	compute_node VARCHAR(64) NULL DEFAULT NULL,
+	pci VARCHAR(50) NULL DEFAULT NULL,
+	switch_dpid VARCHAR(64) NULL DEFAULT NULL,
+	switch_port VARCHAR(64) NULL DEFAULT NULL,
+	switch_mac CHAR(18) NULL DEFAULT NULL,
+	UNIQUE INDEX switch_dpid_switch_port (switch_dpid, switch_port),
+	UNIQUE INDEX switch_dpid_switch_mac (switch_dpid, switch_mac),
+	UNIQUE INDEX region_compute_node_pci (region, compute_node, pci),
+	INDEX FK_of_port_mappings_ofcs (ofc_id),
+	CONSTRAINT FK_of_port_mappings_ofcs FOREIGN KEY (ofc_id) REFERENCES ofcs (uuid) ON UPDATE CASCADE ON DELETE CASCADE)
+    COLLATE='utf8_general_ci'
+    ENGINE=InnoDB;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (13, '0.13', '0.5.6', 'Add of_port_mapings table', '2017-03-09');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_13(){
+    echo "    downgrade database from version 0.13 to version 0.12"
+    echo "    Delete of_port_mappings table"
+    echo "DROP TABLE of_port_mappings;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '13';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 #TODO ... put funtions here
 

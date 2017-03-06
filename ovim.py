@@ -1073,6 +1073,63 @@ class ovim():
         else:
             raise ovimException(str(content), -result)
 
+    def set_of_port_mapping(self, of_maps, ofc_id=None, switch_dpid=None, region=None):
+        """
+        Create new port mapping entry
+        :param of_maps: List with port mapping information
+        # maps =[{"ofc_id": <ofc_id>,"region": datacenter region,"compute_node": compute uuid,"pci": pci adress,
+                "switch_dpid": swith dpid,"switch_port": port name,"switch_mac": mac}]
+        :param ofc_id: ofc id
+        :param switch_dpid: switch  dpid
+        :param region: datacenter region id
+        :return:
+        """
+
+        for map in of_maps:
+            if ofc_id:
+                map['ofc_id'] = ofc_id
+            if switch_dpid:
+                map['switch_dpid'] = switch_dpid
+            if region:
+                map['region'] = region
+
+        for of_map in of_maps:
+            result, uuid = self.db.new_row('of_port_mappings', of_map, True)
+            if result > 0:
+                of_map["uuid"] = uuid
+            else:
+                raise ovimException(str(uuid), -result)
+        return of_maps
+
+    def clear_of_port_mapping(self, db_filter={}):
+        """
+        Clear port mapping filtering using db_filter dict
+        :param db_filter: Parameter to filter during remove process
+        :return:
+        """
+        result, content = self.db.delete_row_by_dict(FROM='of_port_mappings', WHERE=db_filter)
+        # delete_row_by_key
+        if result >= 0:
+            return content
+        else:
+            raise ovimException("Error deleting of_port_mappings with filter='{}'".format(str(db_filter)),
+                                HTTP_Internal_Server_Error)
+
+    def get_of_port_mappings(self, column=None, db_filter=None, db_limit=None):
+        """
+        Retrive port mapping from DB
+        :param column:
+        :param db_filter:
+        :return:
+        """
+        result, content = self.db.get_table(SELECT=column, WHERE=db_filter, FROM='of_port_mappings', LIMIT=db_limit)
+
+        if result < 0:
+            self.logger.error("get_of_port_mappings Error %d %s", result, content)
+            raise ovimException(str(content), -result)
+        else:
+            return content
+
     def get_dhcp_controller(self):
         """
         Create an host_thread object for manage openvim controller and not create a thread for itself

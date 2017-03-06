@@ -47,7 +47,7 @@ from vim_schema import host_new_schema, host_edit_schema, tenant_new_schema, \
     flavor_new_schema, flavor_update_schema, \
     image_new_schema, image_update_schema, \
     server_new_schema, server_action_schema, network_new_schema, network_update_schema, \
-    port_new_schema, port_update_schema, openflow_controller_schema
+    port_new_schema, port_update_schema, openflow_controller_schema, of_port_map_new_schema
 import ovim
 import logging
 
@@ -147,6 +147,7 @@ def check_extended(extended, allow_net_attach=False):
 #
 # dictionaries that change from HTTP API to database naming
 #
+http2db_id={'id':'uuid'}
 http2db_host={'id':'uuid'}
 http2db_tenant={'id':'uuid'}
 http2db_flavor={'id':'uuid','imageRef':'image_id'}
@@ -2340,3 +2341,77 @@ def http_delete_port_id(port_id):
         bottle.abort(HTTP_Bad_Request, str(e))
 
 
+@bottle.route(url_base + '/openflow/mapping', method='POST')
+def http_of_port_mapping():
+    """
+    Insert a tenant into the database.
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        http_content = format_in(of_port_map_new_schema)
+        r = remove_extra_items(http_content, of_port_map_new_schema)
+        if r is not None:
+            my.logger.error("http_of_port_mapping: Warning: remove extra items " + str(r), exc_info=True)
+
+        # insert in data base
+        port_mapping = my.ovim.set_of_port_mapping(http_content['of_port_mapings'])
+        change_keys_http2db(port_mapping, http2db_id, reverse=True)
+        delete_nulls(port_mapping)
+        data = {'of_port_mappings': port_mapping}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+
+@bottle.route(url_base + '/openflow/mapping', method='GET')
+def get_of_port_mapping():
+    """
+    Insert a tenant into the database.
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        select_, where_, limit_ = filter_query_string(bottle.request.query, http2db_id,
+                                                      ('id', 'ofc_id', 'region', 'compute_node', 'pci',
+                                                       'switch_dpid', 'switch_port', 'switch_mac'))
+        # insert in data base
+        port_mapping = my.ovim.get_of_port_mappings(select_, where_)
+        change_keys_http2db(port_mapping, http2db_id, reverse=True)
+        delete_nulls(port_mapping)
+        data = {'of_port_mappings': port_mapping}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
+
+@bottle.route(url_base + '/openflow/mapping/<region>', method='DELETE')
+def delete_of_port_mapping(region):
+    """
+    Insert a tenant into the database.
+    :return:
+    """
+    my = config_dic['http_threads'][threading.current_thread().name]
+
+    try:
+        # insert in data base
+        db_filter = {'region': region}
+        result = my.ovim.clear_of_port_mapping(db_filter)
+        data = {'result': result}
+        return format_out(data)
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))

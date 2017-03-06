@@ -165,6 +165,7 @@ tenant_new_schema = {
     "required": ["tenant"],
     "additionalProperties": False
 }
+
 tenant_edit_schema = {
     "title":"tenant edition information schema",
     "$schema": "http://json-schema.org/draft-04/schema#",
@@ -736,4 +737,31 @@ openflow_controller_schema = {
     },
     "required": ["ofc"],
     "additionalProperties": False
+}
+
+of_port_new_schema = {
+    "title": "OF port mapping",
+    "type": "object",
+    "properties": {
+        "ofc_id": id_schema,
+        "region": nameshort_schema,
+        "compute_node": nameshort_schema,
+        "pci": pci_schema,
+        "switch_dpid": nameshort_schema,
+        "switch_port": nameshort_schema,
+        "switch_mac": mac_schema
+    },
+    "required": ["region", "compute_node",  "pci", "switch_dpid"]
+}
+
+of_port_map_new_schema = {
+    "title": "OF port mapping",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "properties": {
+        "of_port_mapings": {"type": "array", "items": of_port_new_schema, "minLenght":1},
+    },
+    "required": ["of_port_mapings"],
+    "additionalProperties": False
+
 }
