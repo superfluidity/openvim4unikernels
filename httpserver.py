@@ -2415,3 +2415,4 @@ def delete_of_port_mapping(region):
     except Exception as e:
         my.logger.error(str(e), exc_info=True)
         bottle.abort(HTTP_Bad_Request, str(e))
+

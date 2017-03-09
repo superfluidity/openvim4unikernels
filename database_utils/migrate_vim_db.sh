@@ -180,7 +180,8 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=10  #0.5.2   => 10
 [ $OPENVIM_VER_NUM -ge 5004 ] && DATABASE_TARGET_VER_NUM=11  #0.5.4   => 11
 [ $OPENVIM_VER_NUM -ge 5005 ] && DATABASE_TARGET_VER_NUM=12  #0.5.5   => 12
-[ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 12
+[ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 13
+[ $OPENVIM_VER_NUM -ge 5007 ] && DATABASE_TARGET_VER_NUM=14  #0.5.7   => 14
 #TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -525,6 +526,7 @@ function downgrade_from_12(){
     echo "ALTER TABLE uuids  CHANGE COLUMN used_at used_at ENUM('flavors', 'hosts', 'images', 'instances', 'nets', 'ports', 'tenants') NULL DEFAULT NULL COMMENT 'Table that uses this UUID' ;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '12';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
+
 function upgrade_to_13(){
     echo "    upgrade database from version 0.12 to version 0.13"
     echo "    Create of_port_mapings table "
@@ -553,6 +555,35 @@ function downgrade_from_13(){
     echo "DROP TABLE of_port_mappings;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '13';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
+
+function upgrade_to_14(){
+    echo "    upgrade database from version 0.13 to version 0.14"
+    echo "    Add switch_mac, ofc_id colum to 'ports' and 'resources_port'"
+    echo "ALTER TABLE ports
+	ADD COLUMN switch_mac VARCHAR(18) NULL DEFAULT NULL AFTER switch_port,
+	ADD COLUMN ofc_id VARCHAR(36) NULL DEFAULT NULL AFTER switch_dpid,
+	ADD CONSTRAINT  FK_port_ofc_id  FOREIGN KEY (ofc_id) REFERENCES ofcs (uuid);"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE resources_port
+	ADD COLUMN switch_mac VARCHAR(18) NULL DEFAULT NULL AFTER switch_port,
+	ADD COLUMN ofc_id VARCHAR(36) NULL DEFAULT NULL AFTER switch_dpid,
+	ADD CONSTRAINT FK_resource_ofc_id FOREIGN KEY (ofc_id) REFERENCES ofcs (uuid);"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (14, '0.14', '0.5.7', 'Add switch_mac, ofc_id colum to ports and resources_port tables', '2017-03-09');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_14(){
+    echo "    downgrade database from version 0.14 to version 0.13"
+    echo "    Delete switch_mac, ofc_id colum to 'ports'"
+    echo "ALTER TABLE ports
+	DROP COLUMN switch_mac,
+	DROP COLUMN ofc_id,
+	DROP FOREIGN KEY FK_port_ofc_id;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE resources_port
+	DROP COLUMN switch_mac,
+	DROP COLUMN ofc_id,
+	DROP FOREIGN KEY FK_resource_ofc_id;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '14';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
 #TODO ... put funtions here
 
 echo "db version = "${DATABASE_VER_NUM}

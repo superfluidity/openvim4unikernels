@@ -797,6 +797,72 @@ class ovim():
         else:
             raise ovimException(str(uuid), -result)
 
+    def new_external_port(self, port_data):
+        """
+        Create new external port and check port mapping correspondence
+        :param port_data: port_data = {
+            'region': 'datacenter region',
+            'compute_node': 'compute node id',
+            'pci': 'pci port address',
+            'vlan': 'net vlan',
+            'net_id': 'net id',
+            'tenant_id': 'tenant id',
+            'mac': 'switch mac',
+            'name': 'port name'
+            'ip_address': 'ip address - optional'}
+        :return:
+        """
+
+        port_data['type'] = 'external'
+
+        if port_data.get('net_id'):
+            # check that new net has the correct type
+            result, new_net = self.db.check_target_net(port_data['net_id'], None, 'external')
+            if result < 0:
+                raise ovimException(str(new_net), -result)
+        # insert in data base
+        db_filter = {}
+
+        if port_data.get('region'):
+            db_filter['region'] = port_data['region']
+        if port_data.get('pci'):
+            db_filter['pci'] = port_data['pci']
+        if port_data.get('compute_node'):
+            db_filter['compute_node'] = port_data['compute_node']
+
+        columns = ['ofc_id', 'switch_dpid', 'switch_port', 'switch_mac', 'pci']
+        port_mapping_data = self.get_of_port_mappings(columns, db_filter)
+
+        if not len(port_mapping_data):
+            raise ovimException("No port mapping founded for region='{}', compute id='{}' and pci='{}'".
+                                format(db_filter['region'], db_filter['compute_node'], db_filter['pci']),
+                                HTTP_Not_Found)
+        elif len(port_mapping_data) > 1:
+            raise ovimException("Wrong port data was given, please check pci, region & compute id data",
+                                HTTP_Conflict)
+
+        port_data['ofc_id'] = port_mapping_data[0]['ofc_id']
+        port_data['switch_dpid'] = port_mapping_data[0]['switch_dpid']
+        port_data['switch_port'] = port_mapping_data[0]['switch_port']
+        port_data['switch_mac'] = port_mapping_data[0]['switch_mac']
+
+        # remove from compute_node, region and pci of_port_data to adapt to 'ports' structure
+        del port_data['compute_node']
+        del port_data['region']
+        del port_data['pci']
+
+        result, uuid = self.db.new_row('ports', port_data, True, True)
+        if result > 0:
+            if 'net_id' in port_data and port_data['ofc_id'] in self.config['ofcs_thread']:
+                r, c = self.config['ofcs_thread'][port_data['ofc_id']].insert_task("update-net", port_data['net_id'])
+                if r < 0:
+                    message = "Cannot insert a task for updating network '$s' %s", port_data['net_id'], c
+                    self.logger.error(message)
+                    raise ovimException(message, HTTP_Internal_Server_Error)
+            return uuid
+        else:
+            raise ovimException(str(uuid), -result)
+
     def delete_port(self, port_id):
         # Look for the previous port data
         result, ports = self.db.get_table(WHERE={'uuid': port_id, "type": "external"}, FROM='ports')
