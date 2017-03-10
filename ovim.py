@@ -180,7 +180,7 @@ class ovim():
         # check if this bridge is already used (present at database) for a network)
         used_bridge_nets = []
         for brnet in self.config['bridge_nets']:
-            r, nets = self.db_of.get_table(SELECT=('uuid',), FROM='nets', WHERE={'provider': "bridge:" + brnet[0]})
+            r, nets = self.db.get_table(SELECT=('uuid',), FROM='nets', WHERE={'provider': "bridge:" + brnet[0]})
             if r > 0:
                 brnet[3] = nets[0]['uuid']
                 used_bridge_nets.append(brnet[0])
@@ -192,7 +192,7 @@ class ovim():
         # get nets used by dhcp
         if self.config.get("dhcp_server"):
             for net in self.config["dhcp_server"].get("nets", ()):
-                r, nets = self.db_of.get_table(SELECT=('uuid',), FROM='nets', WHERE={'name': net})
+                r, nets = self.db.get_table(SELECT=('uuid',), FROM='nets', WHERE={'name': net})
                 if r > 0:
                     self.config['dhcp_nets'].append(nets[0]['uuid'])
 
@@ -217,7 +217,7 @@ class ovim():
         host_develop_bridge_iface = self.config.get('development_bridge', None)
 
         # get host list from data base before starting threads
-        r, hosts = self.db_of.get_table(SELECT=('name', 'ip_name', 'user', 'uuid'), FROM='hosts', WHERE={'status': 'ok'})
+        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid'), FROM='hosts', WHERE={'status': 'ok'})
         if r < 0:
             raise ovimException("Cannot get hosts from database {}".format(hosts))
 
@@ -1213,8 +1213,8 @@ class ovim():
         host_develop_mode = True if self.config['mode'] == 'development' else False
 
         dhcp_host = ht.host_thread(name='openvim_controller', user=ovs_controller_user, host=controller_ip,
-                                   db=self.config['db'],
-                                   db_lock=self.config['db_lock'], test=host_test_mode,
+                                   db=self.db_of,
+                                   db_lock=self.db_lock, test=host_test_mode,
                                    image_path=self.config['image_path'], version=self.config['version'],
                                    host_id='openvim_controller', develop_mode=host_develop_mode,
                                    develop_bridge_iface=bridge_ifaces)
