@@ -661,17 +661,24 @@ class ovim():
             # if result > 0 and nbports>0 and 'admin_state_up' in network
             #     and network['admin_state_up'] != network_old[0]['admin_state_up']:
             if result > 0:
-                r, c = self.config['of_thread'].insert_task("update-net", network_id)
-                if r < 0:
-                    raise ovimException("Error while launching openflow rules %s" % c, HTTP_Internal_Server_Error)
+
+                try:
+                    self.net_update_ofc_thread(network_id)
+                except ovimException as e:
+                    raise ovimException("Error while launching openflow rules in network '{}' {}"
+                                        .format(network_id, str(e)), HTTP_Internal_Server_Error)
+                except Exception as e:
+                    raise ovimException("Error while launching openflow rules in network '{}' {}"
+                                        .format(network_id, str(e)), HTTP_Internal_Server_Error)
+
                 if self.config.get("dhcp_server"):
                     if network_id in self.config["dhcp_nets"]:
                         self.config["dhcp_nets"].remove(network_id)
-                    if network.get("name", network_old["name"]) in self.config["dhcp_server"].get("nets", ()):
+                    if network.get("name", network_old[0]["name"]) in self.config["dhcp_server"].get("nets", ()):
                         self.config["dhcp_nets"].append(network_id)
                     else:
-                        net_bind = network.get("bind", network_old["bind"])
-                        if net_bind and net_bind[:7] == "bridge:" and net_bind[7:] in self.config["dhcp_server"].get(
+                        net_bind = network.get("bind_type", network_old[0]["bind_type"])
+                        if net_bind and net_bind and net_bind[:7] == "bridge:" and net_bind[7:] in self.config["dhcp_server"].get(
                                 "bridge_ifaces", ()):
                             self.config["dhcp_nets"].append(network_id)
             return network_id
@@ -744,9 +751,16 @@ class ovim():
             if net["type"] != "ptp" and net["type"] != "data":
                 result -= 1
                 continue
-            r, c = self.config['of_thread'].insert_task("update-net", net['uuid'])
-            if r < 0:
-                raise ovimException(str(c), -r)
+
+            try:
+                self.net_update_ofc_thread(net['uuid'])
+            except ovimException as e:
+                raise ovimException("Error updating network'{}' {}".format(net['uuid'], str(e)),
+                                    HTTP_Internal_Server_Error)
+            except Exception as e:
+                raise ovimException("Error updating network '{}' {}".format(net['uuid'], str(e)),
+                                    HTTP_Internal_Server_Error)
+
         return result
 
     def delete_openflow_rules(self):
@@ -789,10 +803,15 @@ class ovim():
         result, uuid = self.db.new_row('ports', port_data, True, True)
         if result > 0:
             if 'net_id' in port_data:
-                r, c = self.config['of_thread'].insert_task("update-net", port_data['net_id'])
-                if r < 0:
-                    self.logger.error("Cannot insert a task for updating network '$s' %s", port_data['net_id'], c)
-                    #TODO put network in error status
+                try:
+                    self.net_update_ofc_thread(port_data['net_id'])
+                except ovimException as e:
+                    raise ovimException("Cannot insert a task for updating network '{}' {}"
+                                        .format(port_data['net_id'], str(e)), HTTP_Internal_Server_Error)
+                except Exception as e:
+                    raise ovimException("Cannot insert a task for updating network '{}' {}"
+                                        .format(port_data['net_id'], str(e)), HTTP_Internal_Server_Error)
+
             return uuid
         else:
             raise ovimException(str(uuid), -result)
@@ -853,15 +872,58 @@ class ovim():
 
         result, uuid = self.db.new_row('ports', port_data, True, True)
         if result > 0:
-            if 'net_id' in port_data and port_data['ofc_id'] in self.config['ofcs_thread']:
-                r, c = self.config['ofcs_thread'][port_data['ofc_id']].insert_task("update-net", port_data['net_id'])
-                if r < 0:
-                    message = "Cannot insert a task for updating network '$s' %s", port_data['net_id'], c
-                    self.logger.error(message)
-                    raise ovimException(message, HTTP_Internal_Server_Error)
+            try:
+                self.net_update_ofc_thread(port_data['net_id'], port_data['ofc_id'])
+            except ovimException as e:
+                raise ovimException("Cannot insert a task for updating network '{}' {}".
+                                    format(port_data['net_id'], str(e)), HTTP_Internal_Server_Error)
+            except Exception as e:
+                raise ovimException("Cannot insert a task for updating network '{}' {}"
+                                    .format(port_data['net_id'], e), HTTP_Internal_Server_Error)
             return uuid
         else:
             raise ovimException(str(uuid), -result)
+
+    def net_update_ofc_thread(self, net_id, ofc_id=None):
+        """
+        Insert a update net task by net id or ofc_id for each ofc thread
+        :param net_id: network id
+        :param ofc_id: openflow controller id
+        :return:
+        """
+        if not net_id:
+            raise ovimException("No net_id received", HTTP_Internal_Server_Error)
+
+        switch_dpid = None
+        r = -1
+        c = 'No valid ofc_id or switch_dpid received'
+
+        if not ofc_id:
+            ports = self.get_ports(filter={"net_id": net_id})
+            for port in ports:
+                port_ofc_id = port.get('ofc_id', None)
+                if port_ofc_id:
+                    ofc_id = port['ofc_id']
+                    switch_dpid = port['switch_dpid']
+                    break
+
+        # If no ofc_id found it, default ofc_id is used.
+        if not ofc_id and not switch_dpid:
+            ofc_id = "Default"
+
+        if ofc_id and ofc_id in self.config['ofcs_thread']:
+            r, c = self.config['ofcs_thread'][ofc_id].insert_task("update-net", net_id)
+        elif switch_dpid:
+
+            ofcs_dpid_list = self.config['ofcs_thread_dpid']
+            for ofc_t in ofcs_dpid_list:
+                if switch_dpid in ofc_t:
+                    r, c = ofc_t[switch_dpid].insert_task("update-net", net_id)
+
+        if r < 0:
+            message = "Cannot insert a task for updating network '$s', %s", net_id, c
+            self.logger.error(message)
+            raise ovimException(message, HTTP_Internal_Server_Error)
 
     def delete_port(self, port_id):
         # Look for the previous port data
@@ -878,9 +940,16 @@ class ovim():
         network = ports[0].get('net_id', None)
         if network:
             # change of net.
-            r, c = self.config['of_thread'].insert_task("update-net", network)
-            if r < 0:
-                self.logger.error("Cannot insert a task for updating network '$s' %s", network, c)
+
+            try:
+                self.net_update_ofc_thread(network)
+            except ovimException as e:
+                raise ovimException("Cannot insert a task for delete network '{}' {}".format(network, str(e)),
+                                    HTTP_Internal_Server_Error)
+            except Exception as e:
+                raise ovimException("Cannot insert a task for delete network '{}' {}".format(network, str(e)),
+                                    HTTP_Internal_Server_Error)
+
         return content
 
     def edit_port(self, port_id, port_data, admin=True):
@@ -931,10 +1000,15 @@ class ovim():
         # Insert task to complete actions
         if result > 0:
             for net_id in nets:
-                r, v = self.config['of_thread'].insert_task("update-net", net_id)
-                if r < 0:
-                    self.logger.error("Error updating network '{}' {}".format(r,v))
-                    # TODO Do something if fails
+                try:
+                    self.net_update_ofc_thread(net_id)
+                except ovimException as e:
+                    raise ovimException("Error updating network'{}' {}".format(net_id, str(e)),
+                                        HTTP_Internal_Server_Error)
+                except Exception as e:
+                    raise ovimException("Error updating network '{}' {}".format(net_id, str(e)),
+                                        HTTP_Internal_Server_Error)
+
             if host_id:
                 r, v = self.config['host_threads'][host_id].insert_task("edit-iface", port_id, old_net, new_net)
                 if r < 0:

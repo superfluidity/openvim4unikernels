@@ -1619,14 +1619,18 @@ def http_post_server_id(tenant_id):
             r,c = config_dic['host_threads'][ server['host_id'] ].insert_task( 'restore-iface',*port )
             if r < 0:
                 print ' http_post_servers ERROR RESTORE IFACE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c
-        #updata nets
-        for net in nets:
-            r,c = config_dic['of_thread'].insert_task("update-net", net)
-            if r < 0:
-                print ':http_post_servers ERROR UPDATING NETS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c
+        # update nets
+        for net_id in nets:
+            try:
+                my.ovim.net_update_ofc_thread(net_id)
+            except ovim.ovimException as e:
+                raise ovim.ovimException("http_post_servers, Error updating network with id '{}', '{}'".
+                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
+            except Exception as e:
+                raise ovim.ovimException("http_post_servers, Error updating network with id '{}', '{}'".
+                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
 
-            
-        #look for dhcp ip address
+        # look for dhcp ip address
         r2, c2 = my.db.get_table(FROM="ports", SELECT=["mac", "ip_address", "net_id"], WHERE={"instance_id": new_instance})
         if r2 >0:
             for iface in c2:
@@ -1806,12 +1810,20 @@ def http_server_action(server_id, tenant_id, action):
             if r1 < 0:
                 print ' http_post_server_action error at server deletion ERROR resore-iface !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c1
                 data={'result' : 'deleting in process, but ifaces cannot be restored!!!!!'}
-        for net in nets:
-            r1,c1 = config_dic['of_thread'].insert_task("update-net", net)
-            if r1 < 0:
-                print ' http_post_server_action error at server deletion ERROR UPDATING NETS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c1
-                data={'result' : 'deleting in process, but openflow rules cannot be deleted!!!!!'}
-        #look for dhcp ip address 
+        for net_id in nets:
+            try:
+                my.ovim.net_update_ofc_thread(net_id)
+            except ovim.ovimException as e:
+                raise ovim.ovimException("http_post_servers, Error updating network with id '{}', '{}'".
+                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
+            except Exception as e:
+                raise ovim.ovimException("http_post_server_action error at server deletion "
+                                         "ERROR UPDATING NET '{}', '{}'!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".
+                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
+
+            data = {'result': 'deleting in process, but openflow rules cannot be deleted!!!!!'}
+
+        # look for dhcp ip address
         if r2 >0 and config_dic.get("dhcp_server"):
             for iface in c2:
                 if iface["net_id"] in config_dic["dhcp_nets"]:
@@ -1973,7 +1985,7 @@ def http_put_network_id(network_id):
         http_content = format_in(network_update_schema)
         change_keys_http2db(http_content['network'], http2db_network)
         network = http_content['network']
-        return my.ovim.edit_network(network_id, network)
+        return format_out(my.ovim.edit_network(network_id, network))
 
     except ovim.ovimException as e:
         my.logger.error(str(e), exc_info=True)
