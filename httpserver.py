@@ -1624,11 +1624,7 @@ def http_post_server_id(tenant_id):
             try:
                 my.ovim.net_update_ofc_thread(net_id)
             except ovim.ovimException as e:
-                raise ovim.ovimException("http_post_servers, Error updating network with id '{}', '{}'".
-                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
-            except Exception as e:
-                raise ovim.ovimException("http_post_servers, Error updating network with id '{}', '{}'".
-                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
+                my.logger.error("http_post_servers, Error updating network with id '{}', '{}'".format(net_id, str(e)))
 
         # look for dhcp ip address
         r2, c2 = my.db.get_table(FROM="ports", SELECT=["mac", "ip_address", "net_id"], WHERE={"instance_id": new_instance})
@@ -1796,7 +1792,8 @@ def http_server_action(server_id, tenant_id, action):
         return http_get_image_id(tenant_id, image_uuid)
     
     #Update DB only for CREATING or DELETING status
-    data={'result' : 'in process'}
+    data={'result' : 'deleting in process'}
+    warn_text=""
     if new_status != None and new_status == 'DELETING':
         nets=[]
         ports_to_free=[]
@@ -1808,20 +1805,14 @@ def http_server_action(server_id, tenant_id, action):
         for port in ports_to_free:
             r1,c1 = config_dic['host_threads'][ server['host_id'] ].insert_task( 'restore-iface',*port )
             if r1 < 0:
-                print ' http_post_server_action error at server deletion ERROR resore-iface !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c1
-                data={'result' : 'deleting in process, but ifaces cannot be restored!!!!!'}
+                my.logger.error("http_post_server_action server deletion ERROR at resore-iface!!!! " + c1)
+                warn_text += "; Error iface '{}' cannot be restored '{}'".format(str(port), str(e))
         for net_id in nets:
             try:
                 my.ovim.net_update_ofc_thread(net_id)
             except ovim.ovimException as e:
-                raise ovim.ovimException("http_post_servers, Error updating network with id '{}', '{}'".
-                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
-            except Exception as e:
-                raise ovim.ovimException("http_post_server_action error at server deletion "
-                                         "ERROR UPDATING NET '{}', '{}'!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".
-                                         format(net_id, str(e)), HTTP_Internal_Server_Error)
-
-            data = {'result': 'deleting in process, but openflow rules cannot be deleted!!!!!'}
+                my.logger.error("http_server_action, Error updating network with id '{}', '{}'".format(net_id, str(e)))
+                warn_text += "; Error openflow rules of network '{}' cannot be restore '{}'".format(net_id, str (e))
 
         # look for dhcp ip address
         if r2 >0 and config_dic.get("dhcp_server"):
@@ -1840,7 +1831,7 @@ def http_server_action(server_id, tenant_id, action):
             delete_dhcp_ovs_bridge(vlan, net_id)
             delete_mac_dhcp(vm_ip, vlan, mac)
             config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, net_id)
-    return format_out(data)
+    return format_out(data + warn_text)
 
 
 

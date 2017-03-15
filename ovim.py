@@ -939,7 +939,7 @@ class ovim():
                     r, c = ofc_t[switch_dpid].insert_task("update-net", net_id)
 
         if r < 0:
-            message = "Cannot insert a task for updating network '$s', %s", net_id, c
+            message = "Cannot insert a task for updating network '{}', {}".format(net_id, c)
             self.logger.error(message)
             raise ovimException(message, HTTP_Internal_Server_Error)
 
