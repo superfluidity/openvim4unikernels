@@ -2196,9 +2196,9 @@ def http_put_openflow_id(network_id):
     data = {'result': str(result) + " nets updates"}
     return format_out(data)
 
-
+@bottle.route(url_base + '/networks/clear/openflow/<ofc_id>', method='DELETE')
 @bottle.route(url_base + '/networks/clear/openflow', method='DELETE')
-def http_clear_openflow_rules():
+def http_clear_openflow_rules(ofc_id=None):
     """
     To make actions over the net. The action is to delete ALL openflow rules
     :return:
@@ -2208,7 +2208,7 @@ def http_clear_openflow_rules():
     if not my.admin:
         bottle.abort(HTTP_Unauthorized, "Needed admin privileges")
     try:
-        my.ovim.delete_openflow_rules()
+        my.ovim.delete_openflow_rules(ofc_id)
     except ovim.ovimException as e:
         my.logger.error(str(e), exc_info=True)
         bottle.abort(e.http_code, str(e))
@@ -2219,16 +2219,25 @@ def http_clear_openflow_rules():
     data = {'result': " Clearing openflow rules in process"}
     return format_out(data)
 
-
+@bottle.route(url_base + '/networks/openflow/ports/<ofc_id>', method='GET')
 @bottle.route(url_base + '/networks/openflow/ports', method='GET')
-def http_get_openflow_ports():
+def http_get_openflow_ports(ofc_id=None):
     """
     Obtain switch ports names of openflow controller
     :return:
     """
     my = config_dic['http_threads'][threading.current_thread().name]
-    ports = my.ovim.get_openflow_ports()
-    data = {'ports': ports}
+
+    try:
+        ports = my.ovim.get_openflow_ports(ofc_id)
+        data = {'ports': ports}
+    except ovim.ovimException as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(e.http_code, str(e))
+    except Exception as e:
+        my.logger.error(str(e), exc_info=True)
+        bottle.abort(HTTP_Bad_Request, str(e))
+
     return format_out(data)
 #
 # PORTS

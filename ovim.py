@@ -316,7 +316,7 @@ class ovim():
     def _load_of_module(self, db_config):
         """
         import python module for each SDN controller supported
-        :param default: SDN dn information
+        :param db_config: SDN dn information
         :return: Module
         """
         if not db_config:
@@ -326,8 +326,8 @@ class ovim():
 
         try:
             if self.of_test_mode:
-                return  oft.of_test_connector({"name": db_config['type'], "dpid": db_config['dpid'],
-                                               "of_debug": self.config['log_level_of']})
+                return oft.of_test_connector({"name": db_config['type'], "dpid": db_config['dpid'],
+                                              "of_debug": self.config['log_level_of']})
             temp_dict = {}
 
             if db_config:
@@ -719,9 +719,8 @@ class ovim():
             where_ = {}
         else:
             where_ = {"net_id": network_id}
-
         result, content = self.db.get_table(
-            SELECT=("name", "net_id", "priority", "vlan_id", "ingress_port", "src_mac", "dst_mac", "actions"),
+            SELECT=("name", "net_id", "ofc_id", "priority", "vlan_id", "ingress_port", "src_mac", "dst_mac", "actions"),
             WHERE=where_, FROM='of_flows')
 
         if result < 0:
@@ -763,24 +762,44 @@ class ovim():
 
         return result
 
-    def delete_openflow_rules(self):
+    def delete_openflow_rules(self, ofc_id=None):
         """
         To make actions over the net. The action is to delete ALL openflow rules
         :return: return operation result
         """
-        # ignore input data
-        r, c = self.config['of_thread'].insert_task("clear-all")
-        if r < 0:
-            raise ovimException(str(c), -r)
+
+        if not ofc_id:
+            if 'Default' in self.config['ofcs_thread']:
+                r, c = self.config['ofcs_thread']['Default'].insert_task("clear-all")
+            else:
+                raise ovimException("Default Openflow controller not not running", HTTP_Not_Found)
+
+        elif ofc_id in self.config['ofcs_thread']:
+            r, c = self.config['ofcs_thread'][ofc_id].insert_task("clear-all")
+
+            # ignore input data
+            if r < 0:
+                raise ovimException(str(c), -r)
+        else:
+            raise ovimException("Openflow controller not found with ofc_id={}".format(ofc_id), HTTP_Not_Found)
         return r
 
-    def get_openflow_ports(self):
+    def get_openflow_ports(self, ofc_id=None):
         """
         Obtain switch ports names of openflow controller
         :return: Return flow ports in DB
         """
-        data = {'ports': self.config['of_thread'].OF_connector.pp2ofi}
-        return data
+        if not ofc_id:
+            if 'Default' in self.config['ofcs_thread']:
+                conn = self.config['ofcs_thread']['Default'].OF_connector
+            else:
+                raise ovimException("Default Openflow controller not not running", HTTP_Not_Found)
+
+        if ofc_id in self.config['ofcs_thread']:
+            conn = self.config['ofcs_thread'][ofc_id].OF_connector
+        else:
+            raise ovimException("Openflow controller not found with ofc_id={}".format(ofc_id), HTTP_Not_Found)
+        return conn.pp2ofi
 
     def get_ports(self, columns=None, filter={}, limit=None):
         # result, content = my.db.get_ports(where_)

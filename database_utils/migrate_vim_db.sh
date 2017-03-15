@@ -182,6 +182,7 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 5005 ] && DATABASE_TARGET_VER_NUM=12  #0.5.5   => 12
 [ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 13
 [ $OPENVIM_VER_NUM -ge 5007 ] && DATABASE_TARGET_VER_NUM=14  #0.5.7   => 14
+[ $OPENVIM_VER_NUM -ge 5008 ] && DATABASE_TARGET_VER_NUM=15  #0.5.8   => 15
 #TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -582,6 +583,24 @@ function downgrade_from_14(){
 	DROP COLUMN ofc_id,
 	DROP FOREIGN KEY FK_resource_ofc_id;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '14';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function upgrade_to_15(){
+    echo "    upgrade database from version 0.14 to version 0.15"
+    echo "    Add ofc_id colum to 'of_flows'"
+    echo "ALTER TABLE of_flows
+	ADD COLUMN ofc_id VARCHAR(36) NULL DEFAULT NULL AFTER net_id,
+	ADD CONSTRAINT FK_of_flows_ofcs FOREIGN KEY (ofc_id) REFERENCES ofcs (uuid) ON UPDATE CASCADE ON DELETE SET NULL;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (15, '0.15', '0.5.8', 'Add ofc_id colum to of_flows', '2017-03-15');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_15(){
+    echo "    downgrade database from version 0.15 to version 0.14"
+    echo "    Delete ofc_id to 'of_flows'"
+    echo "ALTER TABLE of_flows
+	DROP COLUMN ofc_id,
+	DROP FOREIGN KEY FK_of_flows_ofcs;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '15';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 #TODO ... put funtions here

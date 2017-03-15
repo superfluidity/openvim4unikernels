@@ -95,11 +95,14 @@ class of_test_connector():
         self.rules= {}
         self.logger = logging.getLogger('vim.OF.TEST')
         self.logger.setLevel(getattr(logging, params.get("of_debug", "ERROR")))
+        self.pp2ofi = {}
 
     def get_of_switches(self):
         return 0, ()
+
     def obtain_port_correspondence(self):
         return 0, ()
+
     def del_flow(self, flow_name):
         if flow_name in self.rules:
             self.logger.debug("del_flow OK")
@@ -108,10 +111,12 @@ class of_test_connector():
         else:
             self.logger.warning("del_flow not found")
             return -1, "flow %s not found"
+
     def new_flow(self, data):
         self.rules[ data["name"] ] = data
         self.logger.debug("new_flow OK")
         return 0, None
+
     def get_of_rules(self, translate_of_ports=True):
         return 0, self.rules
 
