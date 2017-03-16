@@ -42,6 +42,7 @@ import dhcp_thread as dt
 import openflow_thread as oft
 from netaddr import IPNetwork
 from jsonschema import validate as js_v, exceptions as js_e
+import openflow_conn
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -342,8 +343,9 @@ class ovim():
 
         try:
             if self.of_test_mode:
-                return oft.of_test_connector({"name": db_config['type'], "dpid": db_config['dpid'],
-                                              "of_debug": self.config['log_level_of']})
+                return openflow_conn.OfTestConnector({"name": db_config['type'],
+                                                      "dpid": db_config['dpid'],
+                                                      "of_debug": self.config['log_level_of']})
             temp_dict = {}
 
             if db_config:

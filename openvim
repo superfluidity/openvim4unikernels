@@ -896,7 +896,7 @@ def openflow_action(args):
         if "ADMIN_PORT" not in vim_config:
             print "OPENVIM_ADMIN_PORT variable not defined"
             return 401 # HTTP_Unauthorized
-        url = "http://%s:%s/openvim/networks/openflow/clear" %(vim_config["HOST"], vim_config["ADMIN_PORT"])
+        url = "http://%s:%s/openvim/networks/clear/openflow" %(vim_config["HOST"], vim_config["ADMIN_PORT"])
         r,c = vim_delete(url)
     else:
         return 400 #HTTP_Bad_Request

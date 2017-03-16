@@ -183,6 +183,7 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 13
 [ $OPENVIM_VER_NUM -ge 5007 ] && DATABASE_TARGET_VER_NUM=14  #0.5.7   => 14
 [ $OPENVIM_VER_NUM -ge 5008 ] && DATABASE_TARGET_VER_NUM=15  #0.5.8   => 15
+[ $OPENVIM_VER_NUM -ge 5009 ] && DATABASE_TARGET_VER_NUM=16  #0.5.9   => 16
 #TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -603,6 +604,22 @@ function downgrade_from_15(){
     echo "DELETE FROM schema_version WHERE version_int = '15';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
+
+function upgrade_to_16(){
+    echo "    upgrade database from version 0.15 to version 0.16"
+    echo "    Add last_error and status colum to 'ofcs'"
+    echo "ALTER TABLE ofcs
+	ADD COLUMN last_error VARCHAR(255) NULL DEFAULT NULL AFTER password,
+	ADD COLUMN status ENUM('ACTIVE','INACTIVE','ERROR') NULL DEFAULT 'ACTIVE' AFTER last_error;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (16, '0.16', '0.5.9', 'Add last_error and status colum to ofcs', '2017-03-17');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_16(){
+    echo "    downgrade database from version 0.16 to version 0.15"
+    echo "    Delete last_error and status colum to 'ofcs'"
+    echo "ALTER TABLE ofcs DROP COLUMN last_error, DROP COLUMN status;	" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '16';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
 #TODO ... put funtions here
 
 echo "db version = "${DATABASE_VER_NUM}

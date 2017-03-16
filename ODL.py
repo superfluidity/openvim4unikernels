@@ -22,11 +22,11 @@
 # contact with: nfvlabs@tid.es
 ##
 
-'''
+"""
 Implement the plugging for OpendayLight openflow controller
 It creates the class OF_conn to create dataplane connections
 with static rules based on packet destination MAC address
-'''
+"""
 
 __author__="Pablo Montes, Alfonso Tierno"
 __date__ ="$28-oct-2014 12:07:15$"
@@ -36,11 +36,14 @@ import json
 import requests
 import base64
 import logging
+import openflow_conn
 
-class OF_conn():
-    '''OpenDayLight connector. No MAC learning is used'''
+
+class OF_conn(openflow_conn.OpenflowConn):
+    """OpenDayLight connector. No MAC learning is used"""
+
     def __init__(self, params):
-        ''' Constructor. 
+        """ Constructor.
             Params: dictionary with the following keys:
                 of_dpid:     DPID to use for this controller
                 of_ip:       controller IP address
@@ -50,15 +53,16 @@ class OF_conn():
                 of_debug:    debug level for logging. Default to ERROR
                 other keys are ignored
             Raise an exception if same parameter is missing or wrong
-        '''
-        #check params
+        """
+
+        # check params
         if "of_ip" not in params or params["of_ip"]==None or "of_port" not in params or params["of_port"]==None:
             raise ValueError("IP address and port must be provided")
-        #internal variables
+
+        openflow_conn.OpenflowConn.__init__(self, params)
+        # internal variables
         self.name = "OpenDayLight"
-        self.headers = {'content-type':'application/json', 
-                        'Accept':'application/json'
-        }
+        self.headers = {'content-type': 'application/json', 'Accept': 'application/json'}
         self.auth=None
         self.pp2ofi={}  # From Physical Port to OpenFlow Index
         self.ofi2pp={}  # From OpenFlow Index to Physical Port
@@ -73,101 +77,118 @@ class OF_conn():
                 of_password=str(params["of_password"])
             self.auth = base64.b64encode(str(params["of_user"])+":"+of_password)
             self.headers['Authorization'] = 'Basic '+self.auth
-            
 
         self.logger = logging.getLogger('vim.OF.ODL')
         self.logger.setLevel( getattr(logging, params.get("of_debug", "ERROR")) )
 
     def get_of_switches(self):
-        ''' Obtain a a list of switches or DPID detected by this controller
-            Return
-                >=0, list:      list length, and a list where each element a tuple pair (DPID, IP address)
-                <0, text_error: if fails
-        '''  
+        """
+        Obtain a a list of switches or DPID detected by this controller
+        :return: list length, and a list where each element a tuple pair (DPID, IP address)
+                 Raise an OpenflowconnConnectionException exception if fails with text_error
+        """
         try:
             of_response = requests.get(self.url+"/restconf/operational/opendaylight-inventory:nodes",
                                        headers=self.headers)
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
             if of_response.status_code != 200:
                 self.logger.warning("get_of_switches " + error_text)
-                return -1 , error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Error get_of_switches " + error_text)
+
             self.logger.debug("get_of_switches " + error_text)
             info = of_response.json()
-            
+
             if type(info) != dict:
                 self.logger.error("get_of_switches. Unexpected response, not a dict: %s", str(info))
-                return -1, "Unexpected response, not a dict. Wrong version?"
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response, not a dict. Wrong version?")
 
             nodes = info.get('nodes')
             if type(nodes) is not dict:
                 self.logger.error("get_of_switches. Unexpected response at 'nodes', not found or not a dict: %s", str(type(info)))
-                return -1, "Unexpected response at 'nodes', not found or not a dict. Wrong version?"
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes', not found or "
+                                                                   "not a dict. Wrong version?")
 
             node_list = nodes.get('node')
             if type(node_list) is not list:
-                self.logger.error("get_of_switches. Unexpected response, at 'nodes':'node', not found or not a list: %s", str(type(node_list)))
-                return -1, "Unexpected response, at 'nodes':'node', not found or not a list. Wrong version?"
+                self.logger.error("get_of_switches. Unexpected response, at 'nodes':'node', "
+                                  "not found or not a list: %s", str(type(node_list)))
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response, at 'nodes':'node', not found "
+                                                                   "or not a list. Wrong version?")
 
             switch_list=[]
             for node in node_list:
                 node_id = node.get('id')
                 if node_id is None:
                     self.logger.error("get_of_switches. Unexpected response at 'nodes':'node'[]:'id', not found: %s", str(node))
-                    return -1, "Unexpected response at 'nodes':'node'[]:'id', not found . Wrong version?"
+                    raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes':'node'[]:'id', "
+                                                                       "not found . Wrong version?")
 
                 if node_id == 'controller-config':
                     continue
 
                 node_ip_address = node.get('flow-node-inventory:ip-address')
                 if node_ip_address is None:
-                    self.logger.error("get_of_switches. Unexpected response at 'nodes':'node'[]:'flow-node-inventory:ip-address', not found: %s", str(node))
-                    return -1, "Unexpected response at 'nodes':'node'[]:'flow-node-inventory:ip-address', not found. Wrong version?"
+                    self.logger.error("get_of_switches. Unexpected response at 'nodes':'node'[]:'flow-node-inventory:"
+                                      "ip-address', not found: %s", str(node))
+                    raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes':'node'[]:"
+                                                                       "'flow-node-inventory:ip-address', "
+                                                                       "not found. Wrong version?")
 
                 node_id_hex=hex(int(node_id.split(':')[1])).split('x')[1].zfill(16)
                 switch_list.append( (':'.join(a+b for a,b in zip(node_id_hex[::2], node_id_hex[1::2])), node_ip_address))
 
             return len(switch_list), switch_list
-        except (requests.exceptions.RequestException, ValueError) as e:
-            #ValueError in the case that JSON can not be decoded
+        except requests.exceptions.RequestException as e:
             error_text = type(e).__name__ + ": " + str(e)
             self.logger.error("get_of_switches " + error_text)
-            return -1, error_text
-        
+            raise openflow_conn.OpenflowconnConnectionException(error_text)
+        except ValueError as e:
+            # ValueError in the case that JSON can not be decoded
+            error_text = type(e).__name__ + ": " + str(e)
+            self.logger.error("get_of_switches " + error_text)
+            raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
+
     def obtain_port_correspondence(self):
-        '''Obtain the correspondence between physical and openflow port names
-        return:
-             0, dictionary: with physical name as key, openflow name as value
-            -1, error_text: if fails
-        '''
+        """
+        Obtain the correspondence between physical and openflow port names
+        :return: dictionary: with physical name as key, openflow name as value,
+                 Raise a OpenflowconnConnectionException expection in case of failure
+        """
         try:
             of_response = requests.get(self.url+"/restconf/operational/opendaylight-inventory:nodes",
                                        headers=self.headers)
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
             if of_response.status_code != 200:
                 self.logger.warning("obtain_port_correspondence " + error_text)
-                return -1 , error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
             self.logger.debug("obtain_port_correspondence " + error_text)
             info = of_response.json()
-            
+
             if type(info) != dict:
                 self.logger.error("obtain_port_correspondence. Unexpected response not a dict: %s", str(info))
-                return -1, "Unexpected openflow response, not a dict. Wrong version?"
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected openflow response, not a dict. "
+                                                                   "Wrong version?")
 
             nodes = info.get('nodes')
             if type(nodes) is not dict:
-                self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes', not found or not a dict: %s", str(type(nodes)))
-                return -1, "Unexpected response at 'nodes',not found or not a dict. Wrong version?"
+                self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes', "
+                                  "not found or not a dict: %s", str(type(nodes)))
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes',not found or not a dict. Wrong version?")
 
             node_list = nodes.get('node')
             if type(node_list) is not list:
-                self.logger.error("obtain_port_correspondence. Unexpected response, at 'nodes':'node', not found or not a list: %s", str(type(node_list)))
-                return -1, "Unexpected response, at 'nodes':'node', not found or not a list. Wrong version?"
+                self.logger.error("obtain_port_correspondence. Unexpected response, at 'nodes':'node', "
+                                  "not found or not a list: %s", str(type(node_list)))
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response, at 'nodes':'node', "
+                                                                   "not found or not a list. Wrong version?")
 
             for node in node_list:
                 node_id = node.get('id')
                 if node_id is None:
-                    self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes':'node'[]:'id', not found: %s", str(node))
-                    return -1, "Unexpected response at 'nodes':'node'[]:'id', not found . Wrong version?"
+                    self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes':'node'[]:'id', "
+                                      "not found: %s", str(node))
+                    raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes':'node'[]:'id', "
+                                                                       "not found . Wrong version?")
 
                 if node_id == 'controller-config':
                     continue
@@ -180,37 +201,44 @@ class OF_conn():
 
                 node_connector_list = node.get('node-connector')
                 if type(node_connector_list) is not list:
-                    self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes':'node'[]:'node-connector', not found or not a list: %s", str(node))
-                    return -1, "Unexpected response at 'nodes':'node'[]:'node-connector', not found  or not a list. Wrong version?"
+                    self.logger.error("obtain_port_correspondence. Unexpected response at "
+                                      "'nodes':'node'[]:'node-connector', not found or not a list: %s", str(node))
+                    raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes':'node'[]:"
+                                                                       "'node-connector', not found  or not a list. "
+                                                                       "Wrong version?")
 
                 for node_connector in node_connector_list:
                     self.pp2ofi[ str(node_connector['flow-node-inventory:name']) ] = str(node_connector['id'] )
                     self.ofi2pp[ node_connector['id'] ] =  str(node_connector['flow-node-inventory:name'])
 
-
                 node_ip_address = node.get('flow-node-inventory:ip-address')
                 if node_ip_address is None:
-                    self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes':'node'[]:'flow-node-inventory:ip-address', not found: %s", str(node))
-                    return -1, "Unexpected response at 'nodes':'node'[]:'flow-node-inventory:ip-address', not found. Wrong version?"
+                    self.logger.error("obtain_port_correspondence. Unexpected response at 'nodes':'node'[]:"
+                                      "'flow-node-inventory:ip-address', not found: %s", str(node))
+                    raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'nodes':'node'[]:"
+                                                                       "'flow-node-inventory:ip-address', not found. Wrong version?")
                 self.ip_address = node_ip_address
 
-                #If we found the appropriate dpid no need to continue in the for loop
+                # If we found the appropriate dpid no need to continue in the for loop
                 break
 
-            #print self.name, ": obtain_port_correspondence ports:", self.pp2ofi
-            return 0, self.pp2ofi
-        except (requests.exceptions.RequestException, ValueError) as e:
-            #ValueError in the case that JSON can not be decoded
+            # print self.name, ": obtain_port_correspondence ports:", self.pp2ofi
+            return self.pp2ofi
+        except requests.exceptions.RequestException as e:
             error_text = type(e).__name__ + ": " + str(e)
             self.logger.error("obtain_port_correspondence " + error_text)
-            return -1, error_text
-        
+            raise openflow_conn.OpenflowconnConnectionException(error_text)
+        except ValueError as e:
+            # ValueError in the case that JSON can not be decoded
+            error_text = type(e).__name__ + ": " + str(e)
+            self.logger.error("obtain_port_correspondence " + error_text)
+            raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
+
     def get_of_rules(self, translate_of_ports=True):
-        ''' Obtain the rules inserted at openflow controller
-            Params:
-                translate_of_ports: if True it translates ports from openflow index to physical switch name
-            Return:
-                0, dict if ok: with the rule name as key and value is another dictionary with the following content:
+        """
+        Obtain the rules inserted at openflow controller
+        :param translate_of_ports:
+        :return: dict if ok: with the rule name as key and value is another dictionary with the following content:
                     priority: rule priority
                     name:         rule name (present also as the master dict key)
                     ingress_port: match input port of the rule
@@ -218,69 +246,77 @@ class OF_conn():
                     vlan_id:      match vlan tag of the rule, can be missing or None if not apply
                     actions:      list of actions, composed by a pair tuples:
                         (vlan, None/int): for stripping/setting a vlan tag
-                        (out, port):      send to this port 
-                    switch:       DPID, all 
-                -1, text_error if fails
-        '''   
-        
-        if len(self.ofi2pp) == 0:
-            r,c = self.obtain_port_correspondence()
-            if r<0:
-                return r,c
-        #get rules
+                        (out, port):      send to this port
+                    switch:       DPID, all
+                    Raise a OpenflowconnConnectionException expection in case of failure
+
+        """
+
         try:
+            # get rules
+            if len(self.ofi2pp) == 0:
+                self.obtain_port_correspondence()
+
             of_response = requests.get(self.url+"/restconf/config/opendaylight-inventory:nodes/node/" + self.id +
                                           "/table/0", headers=self.headers)
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
 
             # The configured page does not exist if there are no rules installed. In that case we return an empty dict
             if of_response.status_code == 404:
-                return 0, {}
+                return {}
 
             elif of_response.status_code != 200:
                 self.logger.warning("get_of_rules " + error_text)
-                return -1 , error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
+
             self.logger.debug("get_of_rules " + error_text)
-            
+
             info = of_response.json()
 
             if type(info) != dict:
                 self.logger.error("get_of_rules. Unexpected response not a dict: %s", str(info))
-                return -1, "Unexpected openflow response, not a dict. Wrong version?"
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected openflow response, not a dict. "
+                                                                   "Wrong version?")
 
             table = info.get('flow-node-inventory:table')
             if type(table) is not list:
-                self.logger.error("get_of_rules. Unexpected response at 'flow-node-inventory:table', not a list: %s", str(type(table)))
-                return -1, "Unexpected response at 'flow-node-inventory:table', not a list. Wrong version?"
+                self.logger.error("get_of_rules. Unexpected response at 'flow-node-inventory:table', "
+                                  "not a list: %s", str(type(table)))
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'flow-node-inventory:table',"
+                                                                   " not a list. Wrong version?")
 
             flow_list = table[0].get('flow')
             if flow_list is None:
-                return 0, {}
+                return {}
 
             if type(flow_list) is not list:
                 self.logger.error("get_of_rules. Unexpected response at 'flow-node-inventory:table'[0]:'flow', not a list: %s", str(type(flow_list)))
-                return -1, "Unexpected response at 'flow-node-inventory:table'[0]:'flow', not a list. Wrong version?"
+                raise openflow_conn.OpenflowconnUnexpectedResponse("Unexpected response at 'flow-node-inventory:"
+                                                                   "table'[0]:'flow', not a list. Wrong version?")
 
-            #TODO translate ports according to translate_of_ports parameter
+            # TODO translate ports according to translate_of_ports parameter
 
             rules = dict()
             for flow in flow_list:
-                if not ('id' in flow and 'match' in flow and 'instructions' in flow and \
-                   'instruction' in flow['instructions'] and 'apply-actions' in flow['instructions']['instruction'][0] and \
-                    'action' in flow['instructions']['instruction'][0]['apply-actions']):
-                        return -1, "unexpected openflow response, one or more elements are missing. Wrong version?"
+                if not ('id' in flow and 'match' in flow and 'instructions' in flow and
+                                'instruction' in flow['instructions'] and
+                                'apply-actions' in flow['instructions']['instruction'][0] and
+                                'action' in flow['instructions']['instruction'][0]['apply-actions']):
+                    raise openflow_conn.OpenflowconnUnexpectedResponse("unexpected openflow response, one or more "
+                                                                       "elements are missing. Wrong version?")
 
                 flow['instructions']['instruction'][0]['apply-actions']['action']
 
                 rule = dict()
                 rule['switch'] = self.dpid
                 rule['priority'] = flow.get('priority')
-                #rule['name'] = flow['id']
-                #rule['cookie'] = flow['cookie']
+                # rule['name'] = flow['id']
+                # rule['cookie'] = flow['cookie']
                 if 'in-port' in flow['match']:
                     in_port = flow['match']['in-port']
                     if not in_port in self.ofi2pp:
-                        return -1, "Error: Ingress port "+in_port+" is not in switch port list"
+                        raise openflow_conn.OpenflowconnUnexpectedResponse("Error: Ingress port " + in_port +
+                                                                           " is not in switch port list")
 
                     if translate_of_ports:
                         in_port = self.ofi2pp[in_port]
@@ -308,11 +344,14 @@ class OF_conn():
                 for instruction in instructions:
                     if 'output-action' in instruction:
                         if not 'output-node-connector' in instruction['output-action']:
-                            return -1, "unexpected openflow response, one or more elementa are missing. Wrong version?"
+                            raise openflow_conn.OpenflowconnUnexpectedResponse("unexpected openflow response, one or "
+                                                                               "more elementa are missing. "
+                                                                               "Wrong version?")
 
                         out_port = instruction['output-action']['output-node-connector']
                         if not out_port in self.ofi2pp:
-                            return -1, "Error: Output port "+out_port+" is not in switch port list"
+                            raise openflow_conn.OpenflowconnUnexpectedResponse("Error: Output port " + out_port +
+                                                                               " is not in switch port list")
 
                         if translate_of_ports:
                             out_port = self.ofi2pp[out_port]
@@ -324,7 +363,9 @@ class OF_conn():
 
                     elif 'set-field' in instruction:
                         if not ('vlan-match' in instruction['set-field'] and 'vlan-id' in  instruction['set-field']['vlan-match'] and 'vlan-id' in instruction['set-field']['vlan-match']['vlan-id']):
-                            return -1, "unexpected openflow response, one or more elements are missing. Wrong version?"
+                            raise openflow_conn.OpenflowconnUnexpectedResponse("unexpected openflow response, one or "
+                                                                               "more elements are missing. "
+                                                                               "Wrong version?")
 
                         actions[instruction['order']] = ('vlan', instruction['set-field']['vlan-match']['vlan-id']['vlan-id'])
 
@@ -341,7 +382,7 @@ class OF_conn():
                 # match -> in-port
                 #      -> vlan-match -> vlan-id -> vlan-id
                 #flow['match']['vlan-match']['vlan-id']['vlan-id-present']
-                #TODO se asume que no se usan reglas con vlan-id-present:false
+                #TODO we asume that is not using rules with vlan-id-present:false
                 #instructions -> instruction -> apply-actions -> action
                 #instructions=flow['instructions']['instruction'][0]['apply-actions']['action']
                 #Es una lista. Posibles elementos:
@@ -361,39 +402,43 @@ class OF_conn():
                 #actions = [x for x in actions if x != None]
                 #                                                       -> output-action -> output-node-connector
                 #                                                       -> pop-vlan-action
-
-            return 0, rules
-        except (requests.exceptions.RequestException, ValueError) as e:
-            #ValueError in the case that JSON can not be decoded
+            return rules
+        except requests.exceptions.RequestException as e:
             error_text = type(e).__name__ + ": " + str(e)
             self.logger.error("get_of_rules " + error_text)
-            return -1, error_text
-            
+            raise openflow_conn.OpenflowconnConnectionException(error_text)
+        except ValueError as e:
+            # ValueError in the case that JSON can not be decoded
+            error_text = type(e).__name__ + ": " + str(e)
+            self.logger.error("get_of_rules " + error_text)
+            raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
+
     def del_flow(self, flow_name):
-        ''' Delete an existing rule
-            Params: flow_name, this is the rule name
-            Return
-                0, None if ok
-                -1, text_error if fails
-        '''           
+        """
+        Delete an existing rule
+        :param flow_name: flow_name, this is the rule name
+        :return: Raise a OpenflowconnConnectionException expection in case of failure
+        """
+
         try:
             of_response = requests.delete(self.url+"/restconf/config/opendaylight-inventory:nodes/node/" + self.id +
                                           "/table/0/flow/"+flow_name, headers=self.headers)
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
             if of_response.status_code != 200:
                 self.logger.warning("del_flow " + error_text)
-                return -1 , error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
             self.logger.debug("del_flow OK " + error_text)
-            return 0, None
-
+            return None
         except requests.exceptions.RequestException as e:
+            # raise an exception in case of contection error
             error_text = type(e).__name__ + ": " + str(e)
             self.logger.error("del_flow " + error_text)
-            return -1, error_text
+            raise openflow_conn.OpenflowconnConnectionException(error_text)
 
     def new_flow(self, data):
-        ''' Insert a new static rule
-            Params: data: dictionary with the following content:
+        """
+        Insert a new static rule
+        :param data: dictionary with the following content:
                 priority:     rule priority
                 name:         rule name
                 ingress_port: match input port of the rule
@@ -402,16 +447,15 @@ class OF_conn():
                 actions:      list of actions, composed by a pair tuples with these posibilities:
                     ('vlan', None/int): for stripping/setting a vlan tag
                     ('out', port):      send to this port
-            Return
-                0, None if ok
-                -1, text_error if fails
-        '''   
-        if len(self.pp2ofi) == 0:
-            r,c = self.obtain_port_correspondence()
-            if r<0:
-                return r,c
+        :return: Raise a OpenflowconnConnectionException expection in case of failure
+        """
+
         try:
-            #We have to build the data for the opendaylight call from the generic data
+
+            if len(self.pp2ofi) == 0:
+                self.obtain_port_correspondence()
+
+            # We have to build the data for the opendaylight call from the generic data
             sdata = dict()
             sdata['flow-node-inventory:flow'] = list()
             sdata['flow-node-inventory:flow'].append(dict())
@@ -426,7 +470,7 @@ class OF_conn():
             if not data['ingress_port'] in self.pp2ofi:
                 error_text = 'Error. Port '+data['ingress_port']+' is not present in the switch'
                 self.logger.warning("new_flow " + error_text)
-                return -1, error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
             flow['match']['in-port'] = self.pp2ofi[data['ingress_port']]
             if 'dst_mac' in data:
                 flow['match']['ethernet-match'] = dict()
@@ -450,7 +494,7 @@ class OF_conn():
                 new_action = { 'order': order }
                 if  action[0] == "vlan":
                     if action[1] == None:
-                        #strip vlan
+                        # strip vlan
                         new_action['strip-vlan-action'] = dict()
                     else:
                         new_action['set-field'] = dict()
@@ -462,49 +506,48 @@ class OF_conn():
                     new_action['output-action'] = dict()
                     if not action[1] in self.pp2ofi:
                         error_msj = 'Port '+action[1]+' is not present in the switch'
-                        return -1, error_msj
+                        raise openflow_conn.OpenflowconnUnexpectedResponse(error_msj)
 
                     new_action['output-action']['output-node-connector'] = self.pp2ofi[ action[1] ]
                 else:
                     error_msj = "Unknown item '%s' in action list" % action[0]
                     self.logger.error("new_flow " + error_msj)
-                    return -1, error_msj
+                    raise openflow_conn.OpenflowconnUnexpectedResponse(error_msj)
 
                 actions.append(new_action)
                 order += 1
 
-            #print json.dumps(sdata)
+            # print json.dumps(sdata)
             of_response = requests.put(self.url+"/restconf/config/opendaylight-inventory:nodes/node/" + self.id +
                           "/table/0/flow/" + data['name'],
                                 headers=self.headers, data=json.dumps(sdata) )
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
             if of_response.status_code != 200:
                 self.logger.warning("new_flow " + error_text)
-                return -1 , error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
             self.logger.debug("new_flow OK " + error_text)
-            return 0, None
+            return None
 
         except requests.exceptions.RequestException as e:
+            # raise an exception in case of contection error
             error_text = type(e).__name__ + ": " + str(e)
             self.logger.error("new_flow " + error_text)
-            return -1, error_text
+            raise openflow_conn.OpenflowconnConnectionException(error_text)
 
     def clear_all_flows(self):
-        ''' Delete all existing rules
-            Return:
-                0, None if ok
-                -1, text_error if fails
-        '''           
+        """
+        Delete all existing rules
+        :return: Raise a OpenflowconnConnectionException expection in case of failure
+        """
         try:
             of_response = requests.delete(self.url+"/restconf/config/opendaylight-inventory:nodes/node/" + self.id +
                                       "/table/0", headers=self.headers)
             error_text = "Openflow response %d: %s" % (of_response.status_code, of_response.text)
             if of_response.status_code != 200 and of_response.status_code != 404: #HTTP_Not_Found
                 self.logger.warning("clear_all_flows " + error_text)
-                return -1 , error_text
+                raise openflow_conn.OpenflowconnUnexpectedResponse(error_text)
             self.logger.debug("clear_all_flows OK " + error_text)
-            return 0, None
         except requests.exceptions.RequestException as e:
             error_text = type(e).__name__ + ": " + str(e)
             self.logger.error("clear_all_flows " + error_text)
-            return -1, error_text
+            raise openflow_conn.OpenflowconnConnectionException(error_text)
