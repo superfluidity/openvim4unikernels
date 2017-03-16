@@ -2356,7 +2356,7 @@ def http_delete_port_id(port_id):
 @bottle.route(url_base + '/openflow/mapping', method='POST')
 def http_of_port_mapping():
     """
-    Insert a tenant into the database.
+    Create new compute port mapping entry
     :return:
     """
     my = config_dic['http_threads'][threading.current_thread().name]
@@ -2384,7 +2384,7 @@ def http_of_port_mapping():
 @bottle.route(url_base + '/openflow/mapping', method='GET')
 def get_of_port_mapping():
     """
-    Insert a tenant into the database.
+    Get compute port mapping
     :return:
     """
     my = config_dic['http_threads'][threading.current_thread().name]

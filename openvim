@@ -861,6 +861,9 @@ def openflow_action(args):
     if args.action=='port-list':
         url = "http://%s:%s/openvim/networks/openflow/ports" %(vim_config["HOST"], vim_config["PORT"])
         r,c = vim_read(url)
+    elif args.action == 'port-mapping':
+        url = "http://%s:%s/openvim/openflow/mapping" % (vim_config["HOST"], vim_config["PORT"])
+        r, c = vim_read(url)
     elif args.action=='rules-list' or args.action=='reinstall':
         PORT = vim_config["PORT"]
         if args.action=='reinstall':
@@ -1013,6 +1016,9 @@ if __name__=="__main__":
     #openflow rules
     openflow_list_action = subparsers.add_parser("openflow-port-list", help="list openflow switch ports name")
     openflow_list_action.set_defaults(func=openflow_action, action="port-list")
+
+    openflow_list_action = subparsers.add_parser("openflow-port-mapping-list", help="list computes port mapping")
+    openflow_list_action.set_defaults(func=openflow_action, action="port-mapping")
     
     openflow_list_action = subparsers.add_parser("openflow-clear-all", help="removes all openflow rules")
     openflow_list_action.set_defaults(func=openflow_action, action="clear-all")
