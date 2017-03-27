@@ -28,6 +28,9 @@ Two thread will be launched, with normal and administrative permissions.
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
+__version__ = "0.5.8-r524"
+version_date = "March 2017"
+database_version = "0.15"      #expected database schema version
 
 import threading
 import vim_db
@@ -108,6 +111,18 @@ class ovim():
                                                                                 self.config['db_user'],
                                                                                 self.config['db_host']) )
         return db
+
+    @staticmethod
+    def get_version():
+        return __version__
+
+    @staticmethod
+    def get_version_date():
+        return version_date
+
+    @staticmethod
+    def get_database_version():
+        return database_version
 
     @staticmethod
     def _check_dhcp_data_integrity(network):

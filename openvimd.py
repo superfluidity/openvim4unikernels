@@ -30,9 +30,7 @@ and host controllers
 
 __author__ = "Alfonso Tierno"
 __date__ = "$10-jul-2014 12:07:15$"
-__version__ = "0.5.8-r524"
-version_date = "March 2017"
-database_version = "0.15"      #expected database schema version
+
 
 import httpserver
 import auxiliary_functions as af
@@ -150,7 +148,7 @@ if __name__=="__main__":
 
     for o, a in opts:
         if o in ("-v", "--version"):
-            print "openvimd version", __version__, version_date
+            print "openvimd version", ovim.ovim.get_version(), ovim.ovim.get_version_date()
             print "(c) Copyright Telefonica"
             sys.exit(0)
         elif o in ("-h", "--help"):
@@ -219,9 +217,9 @@ if __name__=="__main__":
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
             print "!! Warning, openvimd in TEST mode '%s'" % config_dic['mode']
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-        config_dic['version'] = __version__
+        config_dic['version'] = ovim.get_version()
 
-        config_dic["database_version"] = database_version
+        config_dic["database_version"] = ovim.ovim.get_database_version()
         config_dic["logger_name"] = "openvim"
 
         engine = ovim.ovim(config_dic)
