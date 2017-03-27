@@ -872,8 +872,7 @@ class ovim():
         port_mapping_data = self.get_of_port_mappings(columns, db_filter)
 
         if not len(port_mapping_data):
-            raise ovimException("No port mapping founded for region='{}', compute id='{}' and pci='{}'".
-                                format(db_filter['region'], db_filter['compute_node'], db_filter['pci']),
+            raise ovimException("No port mapping founded for '{}'".format(str(db_filter)),
                                 HTTP_Not_Found)
         elif len(port_mapping_data) > 1:
             raise ovimException("Wrong port data was given, please check pci, region & compute id data",
