@@ -164,15 +164,16 @@ class ovim():
         Start ovim services
         :return:
         """
+        global database_version
         # if self.running_info:
         #    return  #TODO service can be checked and rebuild broken threads
         r = self.db.get_db_version()
         if r[0] < 0:
             raise ovimException("DATABASE is not a VIM one or it is a '0.0' version. Try to upgrade to version '{}' with "\
-                                "'./database_utils/migrate_vim_db.sh'".format(self.config["database_version"]) )
-        elif r[1] != self.config["database_version"]:
+                                "'./database_utils/migrate_vim_db.sh'".format(database_version) )
+        elif r[1] != database_version:
             raise ovimException("DATABASE wrong version '{}'. Try to upgrade/downgrade to version '{}' with "\
-                                "'./database_utils/migrate_vim_db.sh'".format(r[1], self.config["database_version"]) )
+                                "'./database_utils/migrate_vim_db.sh'".format(r[1], database_version) )
 
         # create database connection for openflow threads
         self.db_of = self._create_database_connection()

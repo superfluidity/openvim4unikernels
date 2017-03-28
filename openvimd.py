@@ -217,9 +217,7 @@ if __name__=="__main__":
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
             print "!! Warning, openvimd in TEST mode '%s'" % config_dic['mode']
             print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-        config_dic['version'] = ovim.get_version()
-
-        config_dic["database_version"] = ovim.ovim.get_database_version()
+        config_dic['version'] = ovim.ovim.get_version()
         config_dic["logger_name"] = "openvim"
 
         engine = ovim.ovim(config_dic)
