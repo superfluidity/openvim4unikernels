@@ -900,9 +900,12 @@ class ovim():
         port_data['switch_mac'] = port_mapping_data[0]['switch_mac']
 
         # remove from compute_node, region and pci of_port_data to adapt to 'ports' structure
-        del port_data['compute_node']
-        del port_data['region']
-        del port_data['pci']
+        if 'region' in port_data:
+            del port_data['region']
+        if 'pci' in port_data:
+            del port_data['pci']
+        if 'compute_node' in port_data:
+            del port_data['compute_node']
 
         result, uuid = self.db.new_row('ports', port_data, True, True)
         if result > 0:
