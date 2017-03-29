@@ -681,7 +681,8 @@ class ovim():
             if result > 0:
 
                 try:
-                    self.net_update_ofc_thread(network_id)
+                    if nbports:
+                        self.net_update_ofc_thread(network_id)
                 except ovimException as e:
                     raise ovimException("Error while launching openflow rules in network '{}' {}"
                                         .format(network_id, str(e)), HTTP_Internal_Server_Error)
@@ -923,17 +924,17 @@ class ovim():
         else:
             raise ovimException(str(uuid), -result)
 
-    def net_update_ofc_thread(self, net_id, ofc_id=None):
+    def net_update_ofc_thread(self, net_id, ofc_id=None, switch_dpid=None):
         """
         Insert a update net task by net id or ofc_id for each ofc thread
         :param net_id: network id
         :param ofc_id: openflow controller id
+        :param switch_dpid: switch dpid
         :return:
         """
         if not net_id:
             raise ovimException("No net_id received", HTTP_Internal_Server_Error)
 
-        switch_dpid = None
         r = -1
         c = 'No valid ofc_id or switch_dpid received'
 
@@ -945,6 +946,8 @@ class ovim():
                     ofc_id = port['ofc_id']
                     switch_dpid = port['switch_dpid']
                     break
+        #TODO if not ofc_id: look at database table ofcs
+
 
         # If no ofc_id found it, default ofc_id is used.
         if not ofc_id and not switch_dpid:
@@ -981,7 +984,7 @@ class ovim():
             # change of net.
 
             try:
-                self.net_update_ofc_thread(network)
+                self.net_update_ofc_thread(network, ofc_id=ports[0]["ofc_id"], switch_dpid=ports[0]["switch_dpid"])
             except ovimException as e:
                 raise ovimException("Cannot insert a task for delete network '{}' {}".format(network, str(e)),
                                     HTTP_Internal_Server_Error)
@@ -1035,12 +1038,13 @@ class ovim():
         # insert in data base
         if result >= 0:
             result, content = self.db.update_rows('ports', port_data, WHERE={'uuid': port_id}, log=False)
+            port.update(port_data)
 
         # Insert task to complete actions
         if result > 0:
             for net_id in nets:
                 try:
-                    self.net_update_ofc_thread(net_id)
+                    self.net_update_ofc_thread(net_id, port["ofc_id"], switch_dpid=port["switch_dpid"])
                 except ovimException as e:
                     raise ovimException("Error updating network'{}' {}".format(net_id, str(e)),
                                         HTTP_Internal_Server_Error)
