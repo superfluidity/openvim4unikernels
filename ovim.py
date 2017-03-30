@@ -394,10 +394,11 @@ class ovim():
         """
         # create openflow thread
 
-        if 'of_controller_nets_with_same_vlan' in self.config:
-            ofc_net_same_vlan = self.config['of_controller_nets_with_same_vlan']
-        else:
-            ofc_net_same_vlan = False
+        #if 'of_controller_nets_with_same_vlan' in self.config:
+        #    ofc_net_same_vlan = self.config['of_controller_nets_with_same_vlan']
+        #else:
+        #    ofc_net_same_vlan = False
+        ofc_net_same_vlan = False
 
         thread = oft.openflow_thread(ofc_uuid, of_conn, of_test=self.of_test_mode, db=self.db_of, db_lock=self.db_lock,
                                      pmp_with_same_vlan=ofc_net_same_vlan, debug=self.config['log_level_of'])

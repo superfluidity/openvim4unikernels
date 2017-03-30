@@ -272,14 +272,14 @@ class openflow_thread(threading.Thread):
                             if vlan_tag == None:
                                 vlan_tag=True
                             elif vlan_tag==False:
-                                text="Passthrough and external port vlan-tagged can not be connected when flag 'of_controller_nets_with_same_vlan' is True"
+                                text="Passthrough and external port vlan-tagged cannot be connected when flag 'of_controller_nets_with_same_vlan' is True"
                                 #print self.name, "Error", text
                                 return -1, text
                         else:
                             if vlan_tag == None:
                                 vlan_tag=False
                             elif vlan_tag == True:
-                                text="SR-IOV and external port not vlan-tagged can not be connected when flag 'of_controller_nets_with_same_vlan' is True"
+                                text="SR-IOV and external port not vlan-tagged cannot be connected when flag 'of_controller_nets_with_same_vlan' is True"
                                 #print self.name, "Error", text
                                 return -1, text
                     elif port["model"]=="PF" or port["model"]=="VFnotShared":
@@ -449,7 +449,7 @@ class openflow_thread(threading.Thread):
                     if vlan_in == None  and src_port['vlan'] != None:
                         vlan_in  = src_port['vlan']
                     elif vlan_in != None  and src_port['vlan'] != None:
-                        #TODO this is something that we can not do. It requires a double VLAN check
+                        #TODO this is something that we cannot do. It requires a double VLAN check
                         #outer VLAN should be src_port['vlan'] and inner VLAN should be vlan_in
                         continue
 
@@ -473,7 +473,7 @@ class openflow_thread(threading.Thread):
                         if vlan_out == None and dst_port['vlan'] != None:
                             vlan_out = dst_port['vlan']
                         elif vlan_out != None and dst_port['vlan'] != None:
-                            #TODO this is something that we can not do. It requires a double VLAN set
+                            #TODO this is something that we cannot do. It requires a double VLAN set
                             #outer VLAN should be dst_port['vlan'] and inner VLAN should be vlan_out
                             continue
                         #if src_port == dst_port:
@@ -530,7 +530,7 @@ class openflow_thread(threading.Thread):
                     final_actions.append( ('vlan', action[0]) )
                     previous_vlan = action[0]
                     if self.pmp_with_same_vlan and action_number:
-                        return -1, "Can not interconnect different vlan tags in a network when flag 'of_controller_nets_with_same_vlan' is True."
+                        return -1, "Cannot interconnect different vlan tags in a network when flag 'of_controller_nets_with_same_vlan' is True."
                     action_number += 1
                 final_actions.append( ('out', action[1]) )
             flow_broadcast['actions'] = final_actions

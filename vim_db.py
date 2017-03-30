@@ -153,7 +153,7 @@ class vim_db():
                 return -HTTP_Conflict, "Value %s already in use for %s" % (e.args[1][de+15:fk], e.args[1][fk+7:])
         if uk>=0:
             if wc>=0:
-                return -HTTP_Bad_Request, "Field %s can not be used for filtering" % e.args[1][uk+14:wc]
+                return -HTTP_Bad_Request, "Field %s cannot be used for filtering" % e.args[1][uk+14:wc]
             if fl>=0:
                 return -HTTP_Bad_Request, "Field %s does not exist" % e.args[1][uk+14:wc]
         return -HTTP_Internal_Server_Error, "Database internal Error %d: %s" % (e.args[0], e.args[1])
@@ -1176,7 +1176,7 @@ class vim_db():
                     self.cur = self.con.cursor()
                     match_found = False
                     if len(valid_hosts)<=0:
-                        error_text = 'No room at data center. Can not find a host with %s MB memory and %s cpus available' % (str(requirements['ram']), str(requirements['vcpus'])) 
+                        error_text = 'No room at data center. Cannot find a host with %s MB memory and %s cpus available' % (str(requirements['ram']), str(requirements['vcpus'])) 
                         #self.logger.debug(error_text)
                         return -1, error_text
                     
@@ -1190,7 +1190,7 @@ class vim_db():
                     self.cur.close()   
                     self.cur = self.con.cursor()
                     if len(valid_for_memory)<=0:
-                        error_text = 'No room at data center. Can not find a host with %s GB Hugepages memory available' % str(requirements['numa']['memory']) 
+                        error_text = 'No room at data center. Cannot find a host with %s GB Hugepages memory available' % str(requirements['numa']['memory']) 
                         #self.logger.debug(error_text)
                         return -1, error_text
 
@@ -1210,7 +1210,7 @@ class vim_db():
                     self.cur.close()   
                     self.cur = self.con.cursor()
                     if len(valid_for_processor)<=0:
-                        error_text = 'No room at data center. Can not find a host with %s %s available' % (str(requirements['numa']['proc_req_nb']),cpu_requirement_text)  
+                        error_text = 'No room at data center. Cannot find a host with %s %s available' % (str(requirements['numa']['proc_req_nb']),cpu_requirement_text)  
                         #self.logger.debug(error_text)
                         return -1, error_text
 
@@ -1237,7 +1237,7 @@ class vim_db():
                             else:
                                 valid_numas.append(m_numa['numa_id'])
                     if len(valid_numas)<=0:
-                        error_text = 'No room at data center. Can not find a host with %s MB hugepages memory and %s %s available in the same numa' %\
+                        error_text = 'No room at data center. Cannot find a host with %s MB hugepages memory and %s %s available in the same numa' %\
                             (requirements['numa']['memory'], str(requirements['numa']['proc_req_nb']),cpu_requirement_text)  
                         #self.logger.debug(error_text)
                         return -1, error_text
@@ -1350,7 +1350,7 @@ class vim_db():
                             break
 
                     if not match_found:
-                        error_text = 'No room at data center. Can not find a host with the required hugepages, vcpus and interfaces'  
+                        error_text = 'No room at data center. Cannot find a host with the required hugepages, vcpus and interfaces'  
                         #self.logger.debug(error_text)
                         return -1, error_text
 
@@ -1709,9 +1709,9 @@ class vim_db():
             if net['tenant_id']==tenant_id and net['shared']=='false':
                 return -1, "needed admin privileges to attach to the net %s" % net_id
         #check types
-        if (net['type'] in ('p2p','data') and port_type != 'instance:data') or \
+        if (net['type'] in ('ptp','data') and port_type not in ('instance:data','external')) or \
             (net['type'] in ('bridge_data','bridge_man') and port_type not in ('instance:bridge', 'instance:ovs')):
-            return -1, "can not attach a port of type %s into a net of type %s" % (port_type, net['type'])
+            return -1, "Cannot attach a port of type %s into a net of type %s" % (port_type, net['type'])
         if net['type'] == 'ptp':
             #look how many 
             nb_ports, data = self.get_ports( {'net_id':net_id} )
