@@ -109,8 +109,8 @@ echo '
 #####        DOWNLOADING AND CONFIGURE FLOODLIGHT           #####
 #################################################################'
     #Install Java JDK and Ant packages at the VM 
-    [ "$_DISTRO" == "Ubuntu" ] && install_packages "build-essential default-jdk ant python-dev screen wget" #TODO revise if packages are needed apart from ant
-    [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_package "                 ant screen wget"
+    [ "$_DISTRO" == "Ubuntu" ] && install_packages "build-essential default-jdk ant python-dev screen wget python-argcomplete python-requests python-yaml" #TODO revise if packages are needed apart from ant
+    [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_package "                 ant screen wget python-argcomplete python-requests python-yaml"
 
   #floodlight 0.9
     echo "downloading v0.90 from the oficial page"
