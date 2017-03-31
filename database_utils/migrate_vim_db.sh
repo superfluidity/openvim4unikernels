@@ -93,7 +93,7 @@ shift $((OPTIND-1))
 OPENVIM_VER="$1"
 if [ -z "$OPENVIM_VER" ]
 then 
-    OPENVIM_VER=`${DIRNAME}/../openvimd.py -v`
+    OPENVIM_VER=`ovim -v`
     OPENVIM_VER=${OPENVIM_VER%%-r*}
     OPENVIM_VER=${OPENVIM_VER##*version }
     echo "    Detected openvim version $OPENVIM_VER"
@@ -131,7 +131,7 @@ echo -e "[client]\nuser='${DBUSER}'\npassword='${DBPASS}'" > "$TEMPFILE"
 #check and ask for database user password
 while ! mysql "$DEF_EXTRA_FILE_PARAM" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1
 do
-        [ -n "$logintry" ] &&  echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
+        [ -n "$logintry" ] && echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
         [ -z "$logintry" ] &&  echo -e "\nProvide database name and credentials"
         read -e -p "mysql database name($DBNAME): " KK
         [ -n "$KK" ] && DBNAME="$KK"

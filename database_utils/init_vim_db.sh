@@ -97,7 +97,7 @@ DEF_EXTRA_FILE_PARAM="--defaults-extra-file=$TEMPFILE"
 if [ -z "${DBPASS}" ]
 then
     password_ok=""
-    echo -e "[client]\nuser='${DBUSER}'\npassword='vimpw'" > "$TEMPFILE"
+    echo -e "[client]\nuser='${DBUSER}'\npassword=vimpw" > "$TEMPFILE"
     mysql --defaults-extra-file="$TEMPFILE" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1 && DBPASS="vimpw"
     echo -e "[client]\nuser='${DBUSER}'\npassword=''" > "$TEMPFILE"
     mysql --defaults-extra-file="$TEMPFILE" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1 && DBPASS=""
@@ -128,6 +128,9 @@ echo "    loading ${DIRNAME}/vim_db_structure.sql"
 sed -e "s/vim_db/$DBNAME/" ${DIRNAME}/vim_db_structure.sql |  mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_
 
 echo "    migrage database version"
+#${DIRNAME}/migrate_vim_db.sh $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_ -d$DBNAME $1
+DIRNAME=$(dirname $(readlink -f ${BASH_SOURCE[0]}))
+echo "${DIRNAME}/migrate_vim_db.sh $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_ -d$DBNAME $1"
 ${DIRNAME}/migrate_vim_db.sh $DBHOST_ $DBPORT_ $DBUSER_ $DBPASS_ -d$DBNAME $1
 
 echo  "    loading ${DIRNAME}/host_ranking.sql"

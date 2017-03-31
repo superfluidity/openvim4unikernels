@@ -37,10 +37,10 @@ function usage(){
     echo -e "     -q --quiet: install in an unattended mode"
     echo -e "     -h --help:  show this help"
     echo -e "     --develop:  install last version for developers, and do not configure as a service"
-    echo -e "     --forcedb:  reinstall vim_db DB, deleting previous database if exists and creating a new one"
     echo -e "     --force:    makes idenpotent, delete previous installations folders if needed"
     echo -e "     --noclone:  assumes that openvim was cloned previously and that this script is run from the local repo"
     echo -e "     --no-install-packages: use this option to skip updating and installing the requires packages. This avoid wasting time if you are sure requires packages are present e.g. because of a previous installation"
+    echo -e "     --no-db: do not insall mysql server"
 }
 
 function install_packages(){
@@ -78,10 +78,11 @@ DBPASSWD=""
 DBPASSWD_PARAM=""
 QUIET_MODE=""
 DEVELOP=""
-FORCEDB=""
 FORCE=""
 NOCLONE=""
 NO_PACKAGES=""
+NO_DB=""
+
 while getopts ":u:p:hiq-:" o; do
     case "${o}" in
         u)
@@ -101,11 +102,11 @@ while getopts ":u:p:hiq-:" o; do
         -)
             [ "${OPTARG}" == "help" ] && usage && exit 0
             [ "${OPTARG}" == "develop" ] && DEVELOP="y" && continue
-            [ "${OPTARG}" == "forcedb" ] && FORCEDB="y" && continue
-            [ "${OPTARG}" == "force" ]   && FORCEDB="y" && FORCE="y" && continue
+            [ "${OPTARG}" == "force" ]   && FORCE="y" && continue
             [ "${OPTARG}" == "noclone" ] && NOCLONE="y" && continue
             [ "${OPTARG}" == "quiet" ] && export QUIET_MODE=yes && export DEBIAN_FRONTEND=noninteractive && continue
             [ "${OPTARG}" == "no-install-packages" ] && export NO_PACKAGES=yes && continue
+            [ "${OPTARG}" == "no-db" ] && NO_DB="y" && continue
             echo -e "Invalid option: '--$OPTARG'\nTry $0 --help for more information" >&2
             exit 1
             ;;
@@ -256,8 +257,20 @@ then
     done
 fi
 
+
+if [ -z "$NO_DB" ]; then
+    if [ -n "$QUIET_MODE" ]; then
+        DB_QUIET='-q'
+    fi
+
+    echo "!!!! install-db-server.sh: ${OPENVIM_BASEFOLDER}/scripts/install-db-server.sh -u $DBUSER $DBPASSWD_PARAM -n vim_db $DB_QUIET"
+    ${OPENVIM_BASEFOLDER}/scripts/install-db-server.sh -u $DBUSER $DBPASSWD_PARAM  $DB_QUIET  || exit 1
+fi
+
+
 if [[ -z "$NO_PACKAGES" ]]
 then
+
 echo '
 #################################################################
 #####               INSTALL PYTHON PACKAGES                 #####
@@ -301,44 +314,6 @@ if [[ -z $NOCLONE ]]; then
     [[ -z $DEVELOP ]] && su $SUDO_USER -c "git -C  ${OPENVIM_BASEFOLDER} checkout tags/v1.0.2"
 fi
 
-echo '
-#################################################################
-#####               CREATE DATABASE                         #####
-#################################################################'
-echo -e "\nCreating temporary file form MYSQL installation and initialization"
-TEMPFILE="$(mktemp -q --tmpdir "installopenvim.XXXXXX")"
-trap 'rm -f "$TEMPFILE"' EXIT
-chmod 0600 "$TEMPFILE"
-echo -e "[client]\n user='$DBUSER'\n password='$DBPASSWD'">"$TEMPFILE"
-
-if db_exists "vim_db" $TEMPFILE ; then
-    if [[ -n $FORCEDB ]]; then
-        echo "   Deleting previous database vim_db"
-        DBDELETEPARAM=""
-        [[ -n $QUIET_MODE ]] && DBDELETEPARAM="-f"
-        mysqladmin --defaults-extra-file=$TEMPFILE -s drop vim_db $DBDELETEPARAM || ! echo "Could not delete vim_db database" || exit 1
-        #echo "REVOKE ALL PRIVILEGES ON vim_db.* FROM 'vim'@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-        #echo "DELETE USER 'vim'@'localhost';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-        mysqladmin --defaults-extra-file=$TEMPFILE -s create vim_db || ! echo "Error creating vim_db database" || exit 1
-        echo "DROP USER 'vim'@'localhost';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-        echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-        echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-        echo " Database 'vim_db' created, user 'vim' password 'vimpw'"
-    else
-        echo "Database exists. Use option '--forcedb' to force the deletion of the existing one" && exit 1
-    fi
-else
-    mysqladmin -u$DBUSER $DBPASSWD_PARAM -s create vim_db || ! echo "Error creating vim_db database" || exit 1
-    echo "CREATE USER 'vim'@'localhost' identified by 'vimpw';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-    echo "GRANT ALL PRIVILEGES ON vim_db.* TO 'vim'@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "Failed while creating user vim at database" || exit 1
-    echo " Database 'vim_db' created, user 'vim' password 'vimpw'"
-fi
-
-echo '
-#################################################################
-#####        INIT DATABASE                                  #####
-#################################################################'
-su $SUDO_USER -c "${OPENVIM_BASEFOLDER}/database_utils/init_vim_db.sh -u vim -p vimpw -d vim_db" || ! echo "Failed while initializing database" || exit 1
 
 
 if [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ]

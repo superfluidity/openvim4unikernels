@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 ##
@@ -35,7 +36,6 @@ database_version = "0.15"      #expected database schema version
 import threading
 import vim_db
 import logging
-import threading
 import imp
 import host_thread as ht
 import dhcp_thread as dt
@@ -43,6 +43,7 @@ import openflow_thread as oft
 from netaddr import IPNetwork
 from jsonschema import validate as js_v, exceptions as js_e
 import openflow_conn
+import argparse
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -1365,4 +1366,12 @@ class ovim():
         controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
         controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path, gateway)
 
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-v","--version", help="increase output verbosity", action="store_true")
+    args = parser.parse_args()
+    if args.version:
+        print ('openvimd version {} {}'.format(ovim.get_version(), ovim.get_version_date()))
+        print ('(c) Copyright Telefonica')
 
