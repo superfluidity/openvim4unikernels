@@ -50,7 +50,7 @@ HTTP_Internal_Server_Error = 500
 
 
 class vim_db():
-    def __init__(self, vlan_range, debug="ERROR"):
+    def __init__(self, vlan_range, logger_name= None, debug=None):
         '''vlan_range must be a tuple (vlan_ini, vlan_end) with available vlan values for networks
         every dataplane network contain a unique value, regardless of it is used or not 
         ''' 
@@ -59,8 +59,13 @@ class vim_db():
         self.net_vlan_usedlist = None
         self.net_vlan_lastused = self.net_vlan_range[0] -1
         self.debug=debug
-        self.logger = logging.getLogger('vim.db')
-        self.logger.setLevel( getattr(logging, debug) )
+        if logger_name:
+            self.logger_name = logger_name
+        else:
+            self.logger_name = 'openvim.db'
+        self.logger = logging.getLogger(self.logger_name)
+        if debug:
+            self.logger.setLevel( getattr(logging, debug) )
 
 
     def connect(self, host=None, user=None, passwd=None, database=None):

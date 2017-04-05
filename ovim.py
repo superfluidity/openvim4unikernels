@@ -29,9 +29,9 @@ Two thread will be launched, with normal and administrative permissions.
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.8-r524"
-version_date = "March 2017"
-database_version = "0.15"      #expected database schema version
+__version__ = "0.5.10-r526"
+version_date = "Apr 2017"
+database_version = "0.17"      #expected database schema version
 
 import threading
 import vim_db
@@ -95,16 +95,17 @@ class ovim():
 
     def __init__(self, configuration):
         self.config = configuration
-        self.logger = logging.getLogger(configuration["logger_name"])
+        self.logger_name = configuration.get("logger_name", "openvim")
+        self.logger = logging.getLogger(self.logger_name)
         self.db = None
-        self.db =   self._create_database_connection()
+        self.db = self._create_database_connection()
         self.db_lock = None
         self.db_of = None
         self.of_test_mode = False
 
     def _create_database_connection(self):
         db = vim_db.vim_db((self.config["network_vlan_range_start"], self.config["network_vlan_range_end"]),
-                           self.config['log_level_db']);
+                           self.logger_name + ".db", self.config.get('log_level_db'))
         if db.connect(self.config['db_host'], self.config['db_user'], self.config['db_passwd'],
                       self.config['db_name']) == -1:
             # self.logger.error("Cannot connect to database %s at %s@%s", self.config['db_name'], self.config['db_user'],
@@ -176,7 +177,8 @@ class ovim():
         elif r[1] != database_version:
             raise ovimException("DATABASE wrong version '{}'. Try to upgrade/downgrade to version '{}' with "\
                                 "'./database_utils/migrate_vim_db.sh'".format(r[1], database_version) )
-
+        self.logger.critical("Starting ovim server version: '{} {}' database version '{}'".format(
+            self.get_version(), self.get_version_date(), self.get_database_version()))
         # create database connection for openflow threads
         self.db_of = self._create_database_connection()
         self.config["db"] = self.db_of
@@ -1369,9 +1371,12 @@ class ovim():
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v","--version", help="increase output verbosity", action="store_true")
+    parser.add_argument("-v","--version", help="show ovim library version", action="store_true")
+    parser.add_argument("--database-version", help="show required database version", action="store_true")
     args = parser.parse_args()
     if args.version:
         print ('openvimd version {} {}'.format(ovim.get_version(), ovim.get_version_date()))
         print ('(c) Copyright Telefonica')
+    elif args.database_version:
+        print ('required database version: {}'.format(ovim.get_database_version()))
 

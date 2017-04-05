@@ -184,6 +184,7 @@ DATABASE_TARGET_VER_NUM=0
 [ $OPENVIM_VER_NUM -ge 5007 ] && DATABASE_TARGET_VER_NUM=14  #0.5.7   => 14
 [ $OPENVIM_VER_NUM -ge 5008 ] && DATABASE_TARGET_VER_NUM=15  #0.5.8   => 15
 [ $OPENVIM_VER_NUM -ge 5009 ] && DATABASE_TARGET_VER_NUM=16  #0.5.9   => 16
+[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
 #TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -620,6 +621,31 @@ function downgrade_from_16(){
     echo "ALTER TABLE ofcs DROP COLUMN last_error, DROP COLUMN status;	" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '16';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
+
+function upgrade_to_17(){
+    echo "    upgrade database from version 0.16 to version 0.17"
+    echo "    Add pci to the unique indexes switch_dpid_switch_port switch_dpid_switch_mac at of_port_mappings"
+    echo "ALTER TABLE of_port_mappings DROP INDEX switch_dpid_switch_port, "\
+          "ADD UNIQUE INDEX switch_dpid_switch_port (switch_dpid, switch_port, pci);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE of_port_mappings DROP INDEX switch_dpid_switch_mac, "\
+         "ADD UNIQUE INDEX switch_dpid_switch_mac (switch_dpid, switch_mac, pci);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "    Add nets_with_same_vlan to table ofcs"
+    echo "ALTER TABLE ofcs ADD COLUMN nets_with_same_vlan ENUM('true','false') NOT NULL DEFAULT 'false' AFTER status;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (17, '0.17', '0.5.10', 'Add pci to unique index dpid port/mac at of_port_mappings', '2017-04-05');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_17(){
+    echo "    downgrade database from version 0.17 to version 0.16"
+    echo "    Delete pci fromthe unique indexes switch_dpid_switch_port switch_dpid_switch_mac at of_port_mappings"
+    echo "ALTER TABLE of_port_mappings DROP INDEX switch_dpid_switch_port, "\
+         "ADD UNIQUE INDEX switch_dpid_switch_port (switch_dpid, switch_port);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "ALTER TABLE of_port_mappings DROP INDEX switch_dpid_switch_mac, "\
+         "ADD UNIQUE INDEX switch_dpid_switch_mac (switch_dpid, switch_mac);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "    Remove nets_with_same_vlan from table ofcs"
+    echo "ALTER TABLE ofcs DROP COLUMN nets_with_same_vlan;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '17';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
 #TODO ... put funtions here
 
 echo "db version = "${DATABASE_VER_NUM}
