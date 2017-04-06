@@ -15,6 +15,8 @@ __maintainer_email__ = 'leonardo.mirabal@altran.com'
 __license__ = 'Apache 2.0'
 __url__ = 'https://osm.etsi.org/gitweb/?p=osm/openvim.git;a=summary'
 
+cmd = 'cp ovim.py ovim'
+system(cmd)
 
 __data_files__ = [('osm/openvim/', ['openvimd.cfg']),
                   ('osm/openvim/database_utils/', ['database_utils/vim_db_structure.sql',
@@ -62,7 +64,7 @@ _req = [
     "libvirt-python"
 ]
 
-__scripts__ = ['openflow', 'ovim']
+__scripts__ = ['openflow', 'openvim', 'ovim']
 
 
 class LibOpenvimInstaller(install):
@@ -78,30 +80,12 @@ class LibOpenvimInstaller(install):
 
     def run(self):
 
-        cmd = 'ln -sf -v /usr/local/osm/openvim/openvimd.cfg /etc/default/openvimd.cfg '
+        cmd = 'ln -sf -v /usr/local/osm/openvim/openvimd.cfg /etc/default/openvimd.cfg'
         system(cmd)
         cmd = 'ln -sf -v /usr/local/osm/openvim/openflow /usr/bin/openflow'
         system(cmd)
         cmd = 'ln -sf -v /usr/local/osm/openvim/ovim.py /usr/bin/ovim'
         system(cmd)
-        if not self.lite:
-            __scripts__.append('openvim')
-            __scripts__.append('openvimd')
-
-            cmd = 'ln -sf -v /usr/local/osm/openvim/openvimd /usr/bin/openvimd'
-            system(cmd)
-            cmd = 'ln -sf -v /usr/local/osm/openvim/openvim /usr/bin/openvim'
-            system(cmd)
-            cmd = 'ln -sf -v /usr/local/osm/openvim/scripts/service-openvim.sh /usr/sbin/service-openvim'
-            system(cmd)
-            cmd = 'ln -sf -v /usr/local/osm/openvim/scripts/openvim-report.sh /usr/sbin/service-report'
-            system(cmd)
-            cmd = 'ln -sf -v /usr/local/osm/openvim/scripts/service-floodlight.sh /usr/sbin/service-floodlight'
-            system(cmd)
-            cmd = 'ln -sf -v /usr/local/osm/openvim/scripts/service-opendaylight.sh /usr/sbin/service-opendaylight'
-            system(cmd)
-            cmd = 'ln -sf -v /usr/local/osm/openvim/scripts/initopenvim.sh /usr/sbin/initopenvim'
-            system(cmd)
 
         install.run(self)
 
