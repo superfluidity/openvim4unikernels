@@ -227,7 +227,8 @@ class ovim():
         dhcp_params = self.config.get("dhcp_server")
         if dhcp_params:
             thread = dt.dhcp_thread(dhcp_params=dhcp_params, test=host_test_mode, dhcp_nets=self.config["dhcp_nets"],
-                                    db=self.db_of, db_lock=self.db_lock, debug=self.config['log_level_of'])
+                                    db=self.db_of, db_lock=self.db_lock, logger_name=self.logger_name + ".dhcp",
+                                    debug=self.config.get('log_level_of'))
             thread.start()
             self.config['dhcp_thread'] = thread
 
