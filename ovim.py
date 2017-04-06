@@ -356,8 +356,8 @@ class ovim():
                 temp_dict['of_port'] = db_config['port']
                 temp_dict['of_dpid'] = db_config['dpid']
                 temp_dict['of_controller'] = db_config['type']
-                temp_dict['of_user'] = db_config['user']
-                temp_dict['of_password'] = db_config['password']
+                temp_dict['of_user'] = db_config.get('user')
+                temp_dict['of_password'] = db_config.get('password')
 
             temp_dict['of_debug'] = self.config['log_level_of']
 
