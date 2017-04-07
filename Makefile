@@ -8,13 +8,12 @@ prepare:
 	mkdir -p build
 	cp *.py build/
 	cp MANIFEST.in build/
-	cp openvimd.py build/openvimd
-	cp ovim.py build/ovim
+	cp openvimd.py openvimd; cp openvimd build/openvimd
+	cp ovim.py ovim; cp ovim build/ovim
 	cp openvim build/
 	cp openflow build/
 	cp openvimd.cfg build/
 	cp -r scripts build/
-	#cd build/scripts; mv service-openvim.sh service-openvim; mv openvim-report.sh openvim-report; mv initopenvim.sh initopenvim
 	cp -r database_utils build/
 
 build: prepare
@@ -22,15 +21,18 @@ build: prepare
 
 clean:
 	rm -rf build
+	rm -rf openvimd ovim
 
 pip:
 	cd build; ./setup.py sdist
 
 install:
-	cd build; python setup.py install
+	cd build/dist; pip  install lib*
 
 install_lite:
-	cd build; python setup.py install --lite
+	cd build/dist; pip  install lib*
+
+
 
 
 
