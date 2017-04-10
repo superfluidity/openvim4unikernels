@@ -1,4 +1,5 @@
-include openvimd.cfg
-recursive-include database_utils *
-recursive-include scripts *
+include openflow
+include openvimd
+include openvim
+recursive-include osm_openvim *
 

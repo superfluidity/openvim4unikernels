@@ -31,9 +31,8 @@ and host controllers
 __author__ = "Alfonso Tierno"
 __date__ = "$10-jul-2014 12:07:15$"
 
-
-import httpserver
-import auxiliary_functions as af
+import osm_openvim.httpserver as httpserver
+import osm_openvim.auxiliary_functions as af
 import sys
 import getopt
 import time
@@ -44,14 +43,16 @@ from vim_schema import config_schema
 import logging
 import logging.handlers as log_handlers
 import socket
-import ovim
+import osm_openvim.ovim as ovim
 
 global config_dic
 global logger
 logger = logging.getLogger('vim')
 
+
 class LoadConfigurationException(Exception):
     pass
+
 
 def load_configuration(configuration_file):
     default_tokens ={'http_port':9080, 'http_host':'localhost', 

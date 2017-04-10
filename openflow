@@ -40,8 +40,8 @@ import imp
 import yaml
 import requests
 import logging
-import openflow_conn
-from openflow_thread import change_db2of, FlowBadFormat
+import osm_openvim.openflow_conn as openflow_conn
+from osm_openvim.openflow_thread import change_db2of, FlowBadFormat
 
 
 def of_switches(args):

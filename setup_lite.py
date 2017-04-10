@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-__name = 'osm_openvim'
+__name = 'lib_osm_openvim'
 __version = '1.0.0'
 __description = 'OSM Openvim library'
 __author = 'ETSI OSM'
@@ -36,18 +36,9 @@ _req = [
     "bottle",
     "MySQL-python",
     "paramiko",
-    "libvirt-python"
 ]
 
-__scripts__ = ['openflow',
-               'openvim',
-               'openvimd',
-               'osm_openvim/scripts/service-openvim',
-               'osm_openvim/scripts/service-opendaylight',
-               'osm_openvim/scripts/service-floodlight',
-               'osm_openvim/scripts/service-openvim',
-               'osm_openvim/scripts/openvim-report',
-               'osm_openvim/scripts/get_dhcp_lease.sh']
+__scripts__ = ['openflow']
 
 setup(name=__name,
       version=__version,
@@ -62,7 +53,7 @@ setup(name=__name,
       packages=[__name],
       package_dir={__name: __name},
       scripts=__scripts__,
-      package_data={'osm_openvim': ['*']},
+      package_data={'lib_osm_openvim': ['*']},
       include_package_data=True,
       install_requires=_req
       )

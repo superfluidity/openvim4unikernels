@@ -92,8 +92,9 @@ shift $((OPTIND-1))
 #GET OPENVIM VERSION
 OPENVIM_VER="$1"
 if [ -z "$OPENVIM_VER" ]
-then 
-    OPENVIM_VER=`ovim -v`
+then
+    OVIM_PATH=`python -c 'import osm_openvim; print osm_openvim.__path__[0]' 2> /dev/null`
+    OPENVIM_VER=`python ${OVIM_PATH}/ovim.py -v 2> /dev/null`
     OPENVIM_VER=${OPENVIM_VER%%-r*}
     OPENVIM_VER=${OPENVIM_VER##*version }
     echo "    Detected openvim version $OPENVIM_VER"
