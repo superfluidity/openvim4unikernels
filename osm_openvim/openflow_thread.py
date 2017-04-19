@@ -165,7 +165,10 @@ class openflow_thread(threading.Thread):
                 else:
                     self.logger.error("unknown task %s", str(task))
             except openflow_conn.OpenflowconnException as e:
+                self.logger.error("OpenflowconnException: " + str(e))
                 self.set_openflow_controller_status(OFC_STATUS_ERROR, str(e))
+            except Exception as e:
+                self.logger.critical("Unexpected exception at run: " + str(e), exc_info=True)
 
     def terminate(self):
         pass

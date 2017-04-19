@@ -40,20 +40,14 @@ import imp
 from vim_schema import localinfo_schema, hostinfo_schema
 import random
 import os
-
-#TODO: insert a logging system
-
-# from logging import Logger
-# import auxiliary_functions as af
-
-# TODO: insert a logging system
+import logging
 
 
 class host_thread(threading.Thread):
     lvirt_module = None
 
     def __init__(self, name, host, user, db, db_lock, test, image_path, host_id, version, develop_mode,
-                 develop_bridge_iface):
+                 develop_bridge_iface, logger_name=None, debug=None):
         '''Init a thread.
         Arguments:
             'id' number of thead
@@ -68,6 +62,7 @@ class host_thread(threading.Thread):
         self.db = db
         self.db_lock = db_lock
         self.test = test
+        self.localinfo_dirty = False
 
         if not test and not host_thread.lvirt_module:
             try:
@@ -75,6 +70,13 @@ class host_thread(threading.Thread):
                 host_thread.lvirt_module = imp.load_module("libvirt", *module_info)
             except (IOError, ImportError) as e:
                 raise ImportError("Cannot import python-libvirt. Openvim not properly installed" +str(e))
+        if logger_name:
+            self.logger_name = logger_name
+        else:
+            self.logger_name = "openvim.host."+name
+        self.logger = logging.getLogger(self.logger_name)
+        if debug:
+            self.logger.setLevel(getattr(logging, debug))
 
 
         self.develop_mode = develop_mode
@@ -105,7 +107,7 @@ class host_thread(threading.Thread):
             self.ssh_conn.connect(self.host, username=self.user, timeout=10) #, None)
         except paramiko.ssh_exception.SSHException as e:
             text = e.args[0]
-            print self.name, ": ssh_connect ssh Exception:", text
+            self.logger.error("ssh_connect ssh Exception: " + text)
         
     def load_localinfo(self):
         if not self.test:
@@ -118,42 +120,42 @@ class host_thread(threading.Thread):
                 (_, stdout, stderr) = self.ssh_conn.exec_command(command)
                 content = stderr.read()
                 if len(content) > 0:
-                    print self.name, ': command:', command, "stderr:", content
+                    self.logger.error("command: '%s' stderr: '%s'", command, content)
 
                 command = 'cat ' +  self.image_path + '/.openvim.yaml'
                 #print self.name, ': command:', command
                 (_, stdout, stderr) = self.ssh_conn.exec_command(command)
                 content = stdout.read()
                 if len(content) == 0:
-                    print self.name, ': command:', command, "stderr:", stderr.read()
-                    raise paramiko.ssh_exception.SSHException("Error empty file ")
+                    self.logger.error("command: '%s' stderr='%s'", command, stderr.read())
+                    raise paramiko.ssh_exception.SSHException("Error empty file, command: '{}'".format(command))
                 self.localinfo = yaml.load(content)
                 js_v(self.localinfo, localinfo_schema)
-                self.localinfo_dirty=False
+                self.localinfo_dirty = False
                 if 'server_files' not in self.localinfo:
                     self.localinfo['server_files'] = {}
-                print self.name, ': localinfo load from host'
+                self.logger.debug("localinfo load from host")
                 return
     
             except paramiko.ssh_exception.SSHException as e:
                 text = e.args[0]
-                print self.name, ": load_localinfo ssh Exception:", text
+                self.logger.error("load_localinfo ssh Exception: " + text)
             except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
-                print self.name, ": load_localinfo libvirt Exception:", text
+                self.logger.error("load_localinfo libvirt Exception: " + text)
             except yaml.YAMLError as exc:
                 text = ""
                 if hasattr(exc, 'problem_mark'):
                     mark = exc.problem_mark
                     text = " at position: (%s:%s)" % (mark.line+1, mark.column+1)
-                print self.name, ": load_localinfo yaml format Exception", text
+                self.logger.error("load_localinfo yaml format Exception " + text)
             except js_e.ValidationError as e:
                 text = ""
                 if len(e.path)>0: text=" at '" + ":".join(map(str, e.path))+"'"
-                print self.name, ": load_localinfo format Exception:", text, e.message 
+                self.logger.error("load_localinfo format Exception: %s %s", text, str(e))
             except Exception as e:
                 text = str(e)
-                print self.name, ": load_localinfo Exception:", text
+                self.logger.error("load_localinfo Exception: " + text)
         
         #not loaded, insert a default data and force saving by activating dirty flag
         self.localinfo = {'files':{}, 'server_files':{} } 
@@ -173,32 +175,32 @@ class host_thread(threading.Thread):
             (_, stdout, stderr) = self.ssh_conn.exec_command(command)
             content = stdout.read()
             if len(content) == 0:
-                print self.name, ': command:', command, "stderr:", stderr.read()
+                self.logger.error("command: '%s' stderr: '%s'", command, stderr.read())
                 raise paramiko.ssh_exception.SSHException("Error empty file ")
             self.hostinfo = yaml.load(content)
             js_v(self.hostinfo, hostinfo_schema)
-            print self.name, ': hostlinfo load from host', self.hostinfo
+            self.logger.debug("hostlinfo load from host " + str(self.hostinfo))
             return
 
         except paramiko.ssh_exception.SSHException as e:
             text = e.args[0]
-            print self.name, ": load_hostinfo ssh Exception:", text
+            self.logger.error("load_hostinfo ssh Exception: " + text)
         except host_thread.lvirt_module.libvirtError as e:
             text = e.get_error_message()
-            print self.name, ": load_hostinfo libvirt Exception:", text
+            self.logger.error("load_hostinfo libvirt Exception: " + text)
         except yaml.YAMLError as exc:
             text = ""
             if hasattr(exc, 'problem_mark'):
                 mark = exc.problem_mark
                 text = " at position: (%s:%s)" % (mark.line+1, mark.column+1)
-            print self.name, ": load_hostinfo yaml format Exception", text
+            self.logger.error("load_hostinfo yaml format Exception " + text)
         except js_e.ValidationError as e:
             text = ""
             if len(e.path)>0: text=" at '" + ":".join(map(str, e.path))+"'"
-            print self.name, ": load_hostinfo format Exception:", text, e.message 
+            self.logger.error("load_hostinfo format Exception: %s %s", text, e.message)
         except Exception as e:
             text = str(e)
-            print self.name, ": load_hostinfo Exception:", text
+            self.logger.error("load_hostinfo Exception: " + text)
         
         #not loaded, insert a default data 
         self.hostinfo = None 
@@ -213,7 +215,7 @@ class host_thread(threading.Thread):
             
             try:
                 command = 'cat > ' +  self.image_path + '/.openvim.yaml'
-                print self.name, ': command:', command
+                self.logger.debug("command:" + command)
                 (stdin, _, _) = self.ssh_conn.exec_command(command)
                 yaml.safe_dump(self.localinfo, stdin, explicit_start=True, indent=4, default_flow_style=False, tags=False, encoding='utf-8', allow_unicode=True)
                 self.localinfo_dirty = False
@@ -221,21 +223,21 @@ class host_thread(threading.Thread):
     
             except paramiko.ssh_exception.SSHException as e:
                 text = e.args[0]
-                print self.name, ": save_localinfo ssh Exception:", text
+                self.logger.error("save_localinfo ssh Exception: " + text)
                 if "SSH session not active" in text:
                     self.ssh_connect()
             except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
-                print self.name, ": save_localinfo libvirt Exception:", text
+                self.logger.error("save_localinfo libvirt Exception: " + text)
             except yaml.YAMLError as exc:
                 text = ""
                 if hasattr(exc, 'problem_mark'):
                     mark = exc.problem_mark
                     text = " at position: (%s:%s)" % (mark.line+1, mark.column+1)
-                print self.name, ": save_localinfo yaml format Exception", text
+                self.logger.error("save_localinfo yaml format Exception " + text)
             except Exception as e:
                 text = str(e)
-                print self.name, ": save_localinfo Exception:", text
+                self.logger.error("save_localinfo Exception: " + text)
 
     def load_servers_from_db(self):
         self.db_lock.acquire()
@@ -244,7 +246,7 @@ class host_thread(threading.Thread):
 
         self.server_status = {}
         if r<0:
-            print self.name, ": Error getting data from database:", c
+            self.logger.error("Error getting data from database: " + c)
             return
         for server in c:
             self.server_status[ server['uuid'] ] = server['status']
@@ -271,10 +273,10 @@ class host_thread(threading.Thread):
             if uuid not in self.server_status:
                 for localfile in images.values():
                     try:
-                        print self.name, ": deleting file '%s' of unused server '%s'" %(localfile['source file'], uuid)
+                        self.logger.debug("deleting file '%s' of unused server '%s'", localfile['source file'], uuid)
                         self.delete_file(localfile['source file'])
                     except paramiko.ssh_exception.SSHException as e:
-                        print self.name, ": Exception deleting file '%s': %s" %(localfile['source file'], str(e))
+                        self.logger.error("Exception deleting file '%s': %s", localfile['source file'], str(e))
                 del self.localinfo['server_files'][uuid]
                 self.localinfo_dirty = True
    
@@ -294,71 +296,76 @@ class host_thread(threading.Thread):
             self.load_servers_from_db()
             self.delete_unused_files()
             while True:
-                self.queueLock.acquire()
-                if not self.taskQueue.empty():
-                    task = self.taskQueue.get()
-                else:
-                    task = None
-                self.queueLock.release()
-    
-                if task is None:
-                    now=time.time()
-                    if self.localinfo_dirty:
-                        self.save_localinfo()
-                    elif self.next_update_server_status < now:
-                        self.update_servers_status()
-                        self.next_update_server_status = now + 5
-                    elif len(self.pending_terminate_server)>0 and self.pending_terminate_server[0][0]<now:
-                        self.server_forceoff()
+                try:
+                    self.queueLock.acquire()
+                    if not self.taskQueue.empty():
+                        task = self.taskQueue.get()
                     else:
-                        time.sleep(1)
-                    continue        
-    
-                if task[0] == 'instance':
-                    print self.name, ": processing task instance", task[1]['action']
-                    retry=0
-                    while retry <2:
-                        retry += 1
-                        r=self.action_on_server(task[1], retry==2)
-                        if r>=0: 
-                            break
-                elif task[0] == 'image':
-                    pass
-                elif task[0] == 'exit':
-                    print self.name, ": processing task exit"
-                    self.terminate()
-                    return 0
-                elif task[0] == 'reload':
-                    print self.name, ": processing task reload terminating and relaunching"
-                    self.terminate()
-                    break
-                elif task[0] == 'edit-iface':
-                    print self.name, ": processing task edit-iface port=%s, old_net=%s, new_net=%s" % (task[1], task[2], task[3])
-                    self.edit_iface(task[1], task[2], task[3])
-                elif task[0] == 'restore-iface':
-                    print self.name, ": processing task restore-iface %s mac=%s" % (task[1], task[2])
-                    self.restore_iface(task[1], task[2])
-                elif task[0] == 'new-ovsbridge':
-                    print self.name, ": Creating compute OVS bridge"
-                    self.create_ovs_bridge()
-                elif task[0] == 'new-vxlan':
-                    print self.name, ": Creating vxlan tunnel=" + task[1] + ", remote ip=" + task[2]
-                    self.create_ovs_vxlan_tunnel(task[1], task[2])
-                elif task[0] == 'del-ovsbridge':
-                    print self.name, ": Deleting OVS bridge"
-                    self.delete_ovs_bridge()
-                elif task[0] == 'del-vxlan':
-                    print self.name, ": Deleting vxlan " + task[1] + " tunnel"
-                    self.delete_ovs_vxlan_tunnel(task[1])
-                elif task[0] == 'create-ovs-bridge-port':
-                    print self.name, ": Adding port ovim-" + task[1] + " to OVS bridge"
-                    self.create_ovs_bridge_port(task[1])
-                elif task[0] == 'del-ovs-port':
-                    print self.name, ": Delete bridge attached to ovs port vlan {} net {}".format(task[1], task[2])
-                    self.delete_bridge_port_attached_to_ovs(task[1], task[2])
-                else:
-                    print self.name, ": unknown task", task
-                
+                        task = None
+                    self.queueLock.release()
+
+                    if task is None:
+                        now=time.time()
+                        if self.localinfo_dirty:
+                            self.save_localinfo()
+                        elif self.next_update_server_status < now:
+                            self.update_servers_status()
+                            self.next_update_server_status = now + 5
+                        elif len(self.pending_terminate_server)>0 and self.pending_terminate_server[0][0]<now:
+                            self.server_forceoff()
+                        else:
+                            time.sleep(1)
+                        continue
+
+                    if task[0] == 'instance':
+                        self.logger.debug("processing task instance " + task[1]['action'])
+                        retry=0
+                        while retry <2:
+                            retry += 1
+                            r=self.action_on_server(task[1], retry==2)
+                            if r>=0:
+                                break
+                    elif task[0] == 'image':
+                        pass
+                    elif task[0] == 'exit':
+                        self.logger.debug("processing task exit")
+                        self.terminate()
+                        return 0
+                    elif task[0] == 'reload':
+                        self.logger.debug("processing task reload terminating and relaunching")
+                        self.terminate()
+                        break
+                    elif task[0] == 'edit-iface':
+                        self.logger.debug("processing task edit-iface port={}, old_net={}, new_net={}".format(
+                                          task[1], task[2], task[3]))
+                        self.edit_iface(task[1], task[2], task[3])
+                    elif task[0] == 'restore-iface':
+                        self.logger.debug("processing task restore-iface={} mac={}".format(task[1], task[2]))
+                        self.restore_iface(task[1], task[2])
+                    elif task[0] == 'new-ovsbridge':
+                        self.logger.debug("Creating compute OVS bridge")
+                        self.create_ovs_bridge()
+                    elif task[0] == 'new-vxlan':
+                        self.logger.debug("Creating vxlan tunnel='{}', remote ip='{}'".format(task[1], task[2]))
+                        self.create_ovs_vxlan_tunnel(task[1], task[2])
+                    elif task[0] == 'del-ovsbridge':
+                        self.logger.debug("Deleting OVS bridge")
+                        self.delete_ovs_bridge()
+                    elif task[0] == 'del-vxlan':
+                        self.logger.debug("Deleting vxlan {} tunnel".format(task[1]))
+                        self.delete_ovs_vxlan_tunnel(task[1])
+                    elif task[0] == 'create-ovs-bridge-port':
+                        self.logger.debug("Adding port ovim-{} to OVS bridge".fromat(task[1]))
+                        self.create_ovs_bridge_port(task[1])
+                    elif task[0] == 'del-ovs-port':
+                        self.logger.debug("Delete bridge attached to ovs port vlan {} net {}".format(task[1], task[2]))
+                        self.delete_bridge_port_attached_to_ovs(task[1], task[2])
+                    else:
+                        self.logger.debug("unknown task " + str(task))
+
+                except Exception as e:
+                    self.logger.critical("Unexpected exception at run: " + str(e), exc_info=True)
+
     def server_forceoff(self, wait_until_finished=False):
         while len(self.pending_terminate_server)>0:
             now = time.time()
@@ -384,8 +391,8 @@ class host_thread(threading.Thread):
                 self.ssh_conn.close()
         except Exception as e:
             text = str(e)
-            print self.name, ": terminate Exception:", text
-        print self.name, ": exit from host_thread" 
+            self.logger.error("terminate Exception: " + text)
+        self.logger.debug("exit from host_thread")
 
     def get_local_iface_name(self, generic_name):
         if self.hostinfo != None and "iface_names" in self.hostinfo and generic_name in self.hostinfo["iface_names"]:
@@ -593,7 +600,7 @@ class host_thread(threading.Thread):
             result, content = self.db.get_table(FROM='nets', SELECT=('provider',),WHERE={'uuid':v['net_id']} )
             self.db_lock.release()
             if result <= 0:
-                print "create_xml_server ERROR getting nets",result, content
+                self.logger.error("create_xml_server ERROR %d getting nets %s", result, content)
                 return -1, content
             #ALF: Allow by the moment the 'default' bridge net because is confortable for provide internet to VM
             #I know it is not secure    
@@ -717,14 +724,20 @@ class host_thread(threading.Thread):
         :return: True if success
         """
         if self.test:
-            return
-        command = 'sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        if len(content) == 0:
             return True
-        else:
+        try:
+            command = 'sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("create_ovs_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_port_to_ovs_bridge(self, vlan, net_uuid):
@@ -736,16 +749,21 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
-
-        port_name = 'ovim-' + vlan
-        command = 'sudo ovs-vsctl del-port br-int ' + port_name
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        if len(content) == 0:
             return True
-        else:
+        try:
+            port_name = 'ovim-' + vlan
+            command = 'sudo ovs-vsctl del-port br-int ' + port_name
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_port_to_ovs_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_dhcp_server(self, vlan, net_uuid, dhcp_path):
@@ -757,28 +775,33 @@ class host_thread(threading.Thread):
         :return:
         """
         if self.test:
-            return
+            return True
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
+        try:
+            net_namespace = 'ovim-' + vlan
+            dhcp_path = os.path.join(dhcp_path, net_namespace)
+            pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
-        net_namespace = 'ovim-' + vlan
-        dhcp_path = os.path.join(dhcp_path, net_namespace)
-        pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
+            command = 'sudo ip netns exec ' + net_namespace + ' cat ' + pid_file
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
 
-        command = 'sudo ip netns exec ' + net_namespace + ' cat ' + pid_file
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            command = 'sudo ip netns exec ' + net_namespace + ' kill -9 ' + content
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
 
-        command = 'sudo ip netns exec ' + net_namespace + ' kill -9 ' + content
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        # if len(content) == 0:
-        #     return True
-        # else:
-        #     return False
+            # if len(content) == 0:
+            #     return True
+            # else:
+            #     return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_dhcp_server ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
+            return False
 
     def is_dhcp_port_free(self, host_id, net_uuid):
         """
@@ -827,16 +850,21 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
-
-        port_name = 'ovim-' + vlan
-        command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + vlan
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        if len(content) == 0:
             return True
-        else:
+        try:
+            port_name = 'ovim-' + vlan
+            command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + vlan
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("add_port_to_ovs_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_dhcp_port(self, vlan, net_uuid):
@@ -848,7 +876,7 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
+            return True
 
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
@@ -879,24 +907,28 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
-
-        port_name = 'ovim-' + vlan
-        command = 'sudo ip link set dev veth0-' + vlan + ' down'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        #
-        # if len(content) != 0:
-        #     return False
-
-        command = 'sudo ifconfig ' + port_name + ' down &&  sudo brctl delbr ' + port_name
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        if len(content) == 0:
             return True
-        else:
+        try:
+            port_name = 'ovim-' + vlan
+            command = 'sudo ip link set dev veth0-' + vlan + ' down'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            # content = stdout.read()
+            #
+            # if len(content) != 0:
+            #     return False
+            command = 'sudo ifconfig ' + port_name + ' down &&  sudo brctl delbr ' + port_name
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_linux_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def create_ovs_bridge_port(self, vlan):
@@ -918,45 +950,50 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
-
-        port_name = 'ovim-' + vlan
-        command = 'sudo brctl show | grep ' + port_name
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        # if exist nothing to create
-        # if len(content) == 0:
-        #     return False
-
-        command = 'sudo brctl addbr ' + port_name
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        # if len(content) == 0:
-        #     return True
-        # else:
-        #     return False
-
-        command = 'sudo brctl stp ' + port_name + ' on'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        # if len(content) == 0:
-        #     return True
-        # else:
-        #     return False
-        command = 'sudo ip link set dev ' + port_name + ' up'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        if len(content) == 0:
             return True
-        else:
+        try:
+            port_name = 'ovim-' + vlan
+            command = 'sudo brctl show | grep ' + port_name
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # if exist nothing to create
+            # if len(content) == 0:
+            #     return False
+
+            command = 'sudo brctl addbr ' + port_name
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # if len(content) == 0:
+            #     return True
+            # else:
+            #     return False
+
+            command = 'sudo brctl stp ' + port_name + ' on'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # if len(content) == 0:
+            #     return True
+            # else:
+            #     return False
+            command = 'sudo ip link set dev ' + port_name + ' up'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("create_linux_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def set_mac_dhcp_server(self, ip, mac, vlan, netmask, dhcp_path):
@@ -971,7 +1008,7 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
+            return True
 
         net_namespace = 'ovim-' + vlan
         dhcp_path = os.path.join(dhcp_path, net_namespace)
@@ -979,23 +1016,28 @@ class host_thread(threading.Thread):
 
         if not ip:
             return False
+        try:
+            ip_data = mac.upper() + ',' + ip
 
-        ip_data = mac.upper() + ',' + ip
+            command = 'sudo  ip netns exec ' + net_namespace + ' touch ' + dhcp_hostsdir
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
 
-        command = 'sudo  ip netns exec ' + net_namespace + ' touch ' + dhcp_hostsdir
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            command = 'sudo  ip netns exec ' + net_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
 
-        command = 'sudo  ip netns exec ' + net_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
 
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        if len(content) == 0:
-            return True
-        else:
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("set_mac_dhcp_server ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_mac_dhcp_server(self, ip, mac, vlan, dhcp_path):
@@ -1010,25 +1052,31 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
-
-        net_namespace = 'ovim-' + vlan
-        dhcp_path = os.path.join(dhcp_path, net_namespace)
-        dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
-
-        if not ip:
             return False
+        try:
+            net_namespace = 'ovim-' + vlan
+            dhcp_path = os.path.join(dhcp_path, net_namespace)
+            dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
 
-        ip_data = mac.upper() + ',' + ip
+            if not ip:
+                return False
 
-        command = 'sudo  ip netns exec ' + net_namespace + ' sudo sed -i \'/' + ip_data + '/d\' ' + dhcp_hostsdir
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            ip_data = mac.upper() + ',' + ip
 
-        if len(content) == 0:
-            return True
-        else:
+            command = 'sudo  ip netns exec ' + net_namespace + ' sudo sed -i \'/' + ip_data + '/d\' ' + dhcp_hostsdir
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            if len(content) == 0:
+                return True
+            else:
+                return False
+
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("set_mac_dhcp_server ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path, gateway):
@@ -1044,46 +1092,51 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
+            return True
+        try:
+            interface = 'tap-' + vlan
+            net_namespace = 'ovim-' + vlan
+            dhcp_path = os.path.join(dhcp_path, net_namespace)
+            leases_path = os.path.join(dhcp_path, "dnsmasq.leases")
+            pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
-        interface = 'tap-' + vlan
-        net_namespace = 'ovim-' + vlan
-        dhcp_path = os.path.join(dhcp_path, net_namespace)
-        leases_path = os.path.join(dhcp_path, "dnsmasq.leases")
-        pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
+            dhcp_range = ip_range[0] + ',' + ip_range[1] + ',' + netmask
 
-        dhcp_range = ip_range[0] + ',' + ip_range[1] + ',' + netmask
-
-        command = 'sudo ip netns exec ' + net_namespace + ' mkdir -p ' + dhcp_path
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        pid_path = os.path.join(dhcp_path, 'dnsmasq.pid')
-        command = 'sudo  ip netns exec ' + net_namespace + ' cat ' + pid_path
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        # check if pid is runing
-        pid_status_path = content
-        if content:
-            command = "ps aux | awk '{print $2 }' | grep " + pid_status_path
-            print self.name, ': command:', command
+            command = 'sudo ip netns exec ' + net_namespace + ' mkdir -p ' + dhcp_path
+            self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
-        if not content:
-            command = 'sudo  ip netns exec ' + net_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
-              '--interface=' + interface + ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
-              ' --dhcp-range ' + dhcp_range + ' --pid-file=' + pid_file + ' --dhcp-leasefile=' + leases_path + \
-              '  --listen-address ' + gateway
 
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.readline()
+            pid_path = os.path.join(dhcp_path, 'dnsmasq.pid')
+            command = 'sudo  ip netns exec ' + net_namespace + ' cat ' + pid_path
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            # check if pid is runing
+            pid_status_path = content
+            if content:
+                command = "ps aux | awk '{print $2 }' | grep " + pid_status_path
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+            if not content:
+                command = 'sudo  ip netns exec ' + net_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
+                  '--interface=' + interface + ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
+                  ' --dhcp-range ' + dhcp_range + ' --pid-file=' + pid_file + ' --dhcp-leasefile=' + leases_path + \
+                  '  --listen-address ' + gateway
 
-        if len(content) == 0:
-            return True
-        else:
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.readline()
+
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("launch_dhcp_server ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_dhcp_interfaces(self, vlan):
@@ -1094,23 +1147,28 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
+            return True
+        try:
+            net_namespace = 'ovim-' + vlan
+            command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + vlan
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
 
-        net_namespace = 'ovim-' + vlan
-        command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + vlan
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' down'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
 
-        command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' down'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo ip link set dev ovs-tap-' + vlan + ' down'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            command = 'sudo ip link set dev ovs-tap-' + vlan + ' down'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_dhcp_interfaces ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
+            return False
 
     def create_dhcp_interfaces(self, vlan, ip, netmask):
         """
@@ -1122,51 +1180,57 @@ class host_thread(threading.Thread):
         """
 
         if self.test:
-            return
-
-        net_namespace = 'ovim-' + vlan
-        namespace_interface = 'tap-' + vlan
-
-        command = 'sudo ip netns add ' + net_namespace
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo ip link add tap-' + vlan + ' type veth peer name ovs-tap-' + vlan
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + vlan + ' tag=' + vlan
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo ip link set tap-' + vlan + ' netns ' + net_namespace
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' up'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo ip link set dev ovs-tap-' + vlan + ' up'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        command = 'sudo  ip netns exec ' + net_namespace + ' ' + ' ifconfig  ' + namespace_interface \
-                  + ' ' + ip + ' netmask ' + netmask
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-
-        if len(content) == 0:
             return True
-        else:
+        try:
+            net_namespace = 'ovim-' + vlan
+            namespace_interface = 'tap-' + vlan
+
+            command = 'sudo ip netns add ' + net_namespace
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ip link add tap-' + vlan + ' type veth peer name ovs-tap-' + vlan
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + vlan + ' tag=' + vlan
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ip link set tap-' + vlan + ' netns ' + net_namespace
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' up'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ip link set dev ovs-tap-' + vlan + ' up'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo  ip netns exec ' + net_namespace + ' ' + ' ifconfig  ' + namespace_interface \
+                      + ' ' + ip + ' netmask ' + netmask
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("create_dhcp_interfaces ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
+
 
     def create_ovs_vxlan_tunnel(self, vxlan_interface, remote_ip):
         """
@@ -1176,17 +1240,23 @@ class host_thread(threading.Thread):
         :return:
         """
         if self.test:
-            return
-        command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
-                  ' -- set Interface ' + vxlan_interface + '  type=vxlan options:remote_ip=' + remote_ip + \
-                  ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        print content
-        if len(content) == 0:
             return True
-        else:
+        try:
+            command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
+                      ' -- set Interface ' + vxlan_interface + '  type=vxlan options:remote_ip=' + remote_ip + \
+                      ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            # print content
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("create_ovs_vxlan_tunnel ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_ovs_vxlan_tunnel(self, vxlan_interface):
@@ -1196,15 +1266,21 @@ class host_thread(threading.Thread):
         :return: True if success.
         """
         if self.test:
-            return
-        command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        print content
-        if len(content) == 0:
             return True
-        else:
+        try:
+            command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            # print content
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_ovs_vxlan_tunnel ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def delete_ovs_bridge(self):
@@ -1213,34 +1289,40 @@ class host_thread(threading.Thread):
         :return: True if success
         """
         if self.test:
-            return
-        command = 'sudo ovs-vsctl del-br br-int'
-        print self.name, ': command:', command
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
-        if len(content) == 0:
             return True
-        else:
+        try:
+            command = 'sudo ovs-vsctl del-br br-int'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_ovs_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
             return False
 
     def get_file_info(self, path):
         command = 'ls -lL --time-style=+%Y-%m-%dT%H:%M:%S ' + path
-        print self.name, ': command:', command
+        self.logger.debug("command: " + command)
         (_, stdout, _) = self.ssh_conn.exec_command(command)
         content = stdout.read()
         if len(content) == 0:
-            return None # file does not exist
+            return None  # file does not exist
         else:
-            return content.split(" ") #(permission, 1, owner, group, size, date, file)
+            return content.split(" ")  # (permission, 1, owner, group, size, date, file)
 
     def qemu_get_info(self, path):
         command = 'qemu-img info ' + path
-        print self.name, ': command:', command
+        self.logger.debug("command: " + command)
         (_, stdout, stderr) = self.ssh_conn.exec_command(command)
         content = stdout.read()
         if len(content) == 0:
             error = stderr.read()
-            print self.name, ": get_qemu_info error ", error
+            self.logger.error("get_qemu_info error " + error)
             raise paramiko.ssh_exception.SSHException("Error getting qemu_info: " + error)
         else:
             try: 
@@ -1250,18 +1332,18 @@ class host_thread(threading.Thread):
                 if hasattr(exc, 'problem_mark'):
                     mark = exc.problem_mark
                     text = " at position: (%s:%s)" % (mark.line+1, mark.column+1)
-                print self.name, ": get_qemu_info yaml format Exception", text
+                self.logger.error("get_qemu_info yaml format Exception " + text)
                 raise paramiko.ssh_exception.SSHException("Error getting qemu_info yaml format" + text)
 
     def qemu_change_backing(self, inc_file, new_backing_file):
         command = 'qemu-img rebase -u -b ' + new_backing_file + ' ' + inc_file 
-        print self.name, ': command:', command
+        self.logger.debug("command: " + command)
         (_, _, stderr) = self.ssh_conn.exec_command(command)
         content = stderr.read()
         if len(content) == 0:
             return 0
         else:
-            print self.name, ": qemu_change_backing error: ", content
+            self.logger.error("qemu_change_backing error: " + content)
             return -1
     
     def get_notused_filename(self, proposed_name, suffix=''):
@@ -1306,7 +1388,7 @@ class host_thread(threading.Thread):
     
     def delete_file(self, file_name):
         command = 'rm -f '+file_name
-        print self.name, ': command:', command
+        self.logger.debug("command: " + command)
         (_, _, stderr) = self.ssh_conn.exec_command(command)
         error_msg = stderr.read()
         if len(error_msg) > 0:
@@ -1321,7 +1403,7 @@ class host_thread(threading.Thread):
             if perserve_time:
                 command += ' --preserve=timestamps'
             command +=  " '{}' '{}'".format(source, destination)
-        print self.name, ': command:', command
+        self.logger.debug("command: " + command)
         (_, _, stderr) = self.ssh_conn.exec_command(command)
         error_msg = stderr.read()
         if len(error_msg) > 0:
@@ -1412,7 +1494,7 @@ class host_thread(threading.Thread):
             result, server_data = self.db.get_instance(server_id)
             self.db_lock.release()
             if result <= 0:
-                print self.name, ": launch_server ERROR getting server from DB",result, server_data
+                self.logger.error("launch_server ERROR getting server from DB %d %s", result, server_data)
                 return result, server_data
     
         #0: get image metadata
@@ -1420,7 +1502,7 @@ class host_thread(threading.Thread):
             use_incremental = None
              
             if "use_incremental" in server_metadata:
-                use_incremental = False if server_metadata["use_incremental"]=="no" else True
+                use_incremental = False if server_metadata["use_incremental"] == "no" else True
 
             server_host_files = self.localinfo['server_files'].get( server['uuid'], {})
             if rebuild:
@@ -1445,7 +1527,7 @@ class host_thread(threading.Thread):
                 self.db_lock.release()
                 if result <= 0:
                     error_text = "ERROR", result, content, "when getting image", dev['image_id']
-                    print self.name, ": launch_server", error_text 
+                    self.logger.error("launch_server " + error_text)
                     return -1, error_text
                 if content[0]['metadata'] is not None:
                     dev['metadata'] = json.loads(content[0]['metadata'])
@@ -1468,7 +1550,7 @@ class host_thread(threading.Thread):
                 if use_incremental_image:
                     local_file_inc = self.get_notused_filename(local_file, '.inc')
                     command = 'qemu-img create -f qcow2 '+local_file_inc+ ' -o backing_file='+ local_file
-                    print 'command:', command
+                    self.logger.debug("command: " + command)
                     (_, _, stderr) = self.ssh_conn.exec_command(command)
                     error_msg = stderr.read()
                     if len(error_msg) > 0:
@@ -1487,14 +1569,14 @@ class host_thread(threading.Thread):
         #3 Create XML
             result, xml = self.create_xml_server(server_data, devices, server_metadata)  #local_file
             if result <0:
-                print self.name, ": create xml server error:", xml
+                self.logger.error("create xml server error: " + xml)
                 return -2, xml
-            print self.name, ": create xml:", xml
+            self.logger.debug("create xml: " + xml)
             atribute = host_thread.lvirt_module.VIR_DOMAIN_START_PAUSED if paused == "yes" else 0
         #4 Start the domain
             if not rebuild: #ensures that any pending destroying server is done
                 self.server_forceoff(True)
-            #print self.name, ": launching instance" #, xml
+            #self.logger.debug("launching instance " + xml)
             conn.createXML(xml, atribute)
             #self.server_status[server_id] = 'PAUSED' if paused == "yes" else 'ACTIVE'
 
@@ -1502,15 +1584,15 @@ class host_thread(threading.Thread):
 
         except paramiko.ssh_exception.SSHException as e:
             text = e.args[0]
-            print self.name, ": launch_server(%s) ssh Exception: %s" %(server_id, text)
+            self.logger.error("launch_server id='%s' ssh Exception: %s", server_id, text)
             if "SSH session not active" in text:
                 self.ssh_connect()
         except host_thread.lvirt_module.libvirtError as e:
             text = e.get_error_message()
-            print self.name, ": launch_server(%s) libvirt Exception: %s"  %(server_id, text)
+            self.logger.error("launch_server id='%s' libvirt Exception: %s", server_id, text)
         except Exception as e:
             text = str(e)
-            print self.name, ": launch_server(%s) Exception: %s"  %(server_id, text)
+            self.logger.error("launch_server id='%s' Exception: %s", server_id, text)
         return -1, text
     
     def update_servers_status(self):
@@ -1548,7 +1630,7 @@ class host_thread(threading.Thread):
                 domain_dict[uuid] = new_status
             conn.close()
         except host_thread.lvirt_module.libvirtError as e:
-            print self.name, ": get_state() Exception '", e.get_error_message()
+            self.logger.error("get_state() Exception " + e.get_error_message())
             return
 
         for server_id, current_status in self.server_status.iteritems():
@@ -1563,7 +1645,7 @@ class host_thread(threading.Thread):
             if new_status == 'INACTIVE' and current_status == 'ERROR':
                 continue #keep ERROR status, because obviously this machine is not running
             #change status
-            print self.name, ": server ", server_id, "status change from ", current_status, "to", new_status
+            self.logger.debug("server id='%s' status change from '%s' to '%s'", server_id, current_status, new_status)
             STATUS={'progress':100, 'status':new_status}
             if new_status == 'ERROR':
                 STATUS['last_error'] = 'machine has crashed'
@@ -1601,10 +1683,14 @@ class host_thread(threading.Thread):
                 if req['status']!='ERROR':
                     time.sleep(5)
                     new_status = 'INACTIVE'
-            elif 'start' in req['action']  and req['status']!='ERROR':      new_status = 'ACTIVE'
-            elif 'resume' in req['action'] and req['status']!='ERROR' and req['status']!='INACTIVE' :     new_status = 'ACTIVE'
-            elif 'pause' in req['action']  and req['status']!='ERROR':      new_status = 'PAUSED'
-            elif 'reboot' in req['action'] and req['status']!='ERROR':     new_status = 'ACTIVE'
+            elif 'start' in req['action']  and req['status']!='ERROR':
+                new_status = 'ACTIVE'
+            elif 'resume' in req['action'] and req['status']!='ERROR' and req['status']!='INACTIVE':
+                new_status = 'ACTIVE'
+            elif 'pause' in req['action']  and req['status']!='ERROR':
+                new_status = 'PAUSED'
+            elif 'reboot' in req['action'] and req['status']!='ERROR':
+                new_status = 'ACTIVE'
             elif 'rebuild' in req['action']:
                 time.sleep(random.randint(20,150))
                 new_status = 'ACTIVE'
@@ -1621,38 +1707,40 @@ class host_thread(threading.Thread):
                     if 'LookupByUUIDString' in text or 'Domain not found' in text or 'No existe un dominio coincidente' in text:
                         dom = None
                     else:
-                        print self.name, ": action_on_server(",server_id,") libvirt exception:", text
+                        self.logger.error("action_on_server id='%s' libvirt exception: %s", server_id, text)
                         raise e
                 
                 if 'forceOff' in req['action']:
                     if dom == None:
-                        print self.name, ": action_on_server(",server_id,") domain not running" 
+                        self.logger.debug("action_on_server id='%s' domain not running", server_id)
                     else:
                         try:
-                            print self.name, ": sending DESTROY to server", server_id 
+                            self.logger.debug("sending DESTROY to server id='%s'", server_id)
                             dom.destroy()
                         except Exception as e:
                             if "domain is not running" not in e.get_error_message():
-                                print self.name, ": action_on_server(",server_id,") Exception while sending force off:", e.get_error_message()
+                                self.logger.error("action_on_server id='%s' Exception while sending force off: %s",
+                                                  server_id, e.get_error_message())
                                 last_error =  'action_on_server Exception while destroy: ' + e.get_error_message()
                                 new_status = 'ERROR'
                 
                 elif 'terminate' in req['action']:
                     if dom == None:
-                        print self.name, ": action_on_server(",server_id,") domain not running" 
+                        self.logger.debug("action_on_server id='%s' domain not running", server_id)
                         new_status = 'deleted'
                     else:
                         try:
                             if req['action']['terminate'] == 'force':
-                                print self.name, ": sending DESTROY to server", server_id 
+                                self.logger.debug("sending DESTROY to server id='%s'", server_id)
                                 dom.destroy()
                                 new_status = 'deleted'
                             else:
-                                print self.name, ": sending SHUTDOWN to server", server_id 
+                                self.logger.debug("sending SHUTDOWN to server id='%s'", server_id)
                                 dom.shutdown()
                                 self.pending_terminate_server.append( (time.time()+10,server_id) )
                         except Exception as e:
-                            print self.name, ": action_on_server(",server_id,") Exception while destroy:", e.get_error_message() 
+                            self.logger.error("action_on_server id='%s' Exception while destroy: %s",
+                                              server_id, e.get_error_message())
                             last_error =  'action_on_server Exception while destroy: ' + e.get_error_message()
                             new_status = 'ERROR'
                             if "domain is not running" in e.get_error_message():
@@ -1660,7 +1748,8 @@ class host_thread(threading.Thread):
                                     dom.undefine()
                                     new_status = 'deleted'
                                 except Exception:
-                                    print self.name, ": action_on_server(",server_id,") Exception while undefine:", e.get_error_message() 
+                                    self.logger.error("action_on_server id='%s' Exception while undefine: %s",
+                                                      server_id, e.get_error_message())
                                     last_error =  'action_on_server Exception2 while undefine:', e.get_error_message()
                             #Exception: 'virDomainDetachDevice() failed'
                     if new_status=='deleted':
@@ -1678,14 +1767,15 @@ class host_thread(threading.Thread):
                 elif 'shutoff' in req['action'] or 'shutdown' in req['action']:
                     try:
                         if dom == None:
-                            print self.name, ": action_on_server(",server_id,") domain not running"
+                            self.logger.debug("action_on_server id='%s' domain not running", server_id)
                         else: 
                             dom.shutdown()
 #                        new_status = 'INACTIVE'
                         #TODO: check status for changing at database
                     except Exception as e:
                         new_status = 'ERROR'
-                        print self.name, ": action_on_server(",server_id,") Exception while shutdown:", e.get_error_message() 
+                        self.logger.error("action_on_server id='%s' Exception while shutdown: %s",
+                                          server_id, e.get_error_message())
                         last_error =  'action_on_server Exception while shutdown: ' + e.get_error_message()
     
                 elif 'rebuild' in req['action']:
@@ -1715,7 +1805,8 @@ class host_thread(threading.Thread):
                             dom.resume()
 #                            new_status = 'ACTIVE'
                     except Exception as e:
-                        print self.name, ": action_on_server(",server_id,") Exception while resume:", e.get_error_message() 
+                        self.logger.error("action_on_server id='%s' Exception while resume: %s",
+                                          server_id, e.get_error_message())
                     
                 elif 'pause' in req['action']:
                     try: 
@@ -1725,7 +1816,8 @@ class host_thread(threading.Thread):
                             dom.suspend()
 #                            new_status = 'PAUSED'
                     except Exception as e:
-                        print self.name, ": action_on_server(",server_id,") Exception while pause:", e.get_error_message() 
+                        self.logger.error("action_on_server id='%s' Exception while pause: %s",
+                                          server_id, e.get_error_message())
     
                 elif 'reboot' in req['action']:
                     try: 
@@ -1733,10 +1825,11 @@ class host_thread(threading.Thread):
                             pass
                         else:
                             dom.reboot()
-                        print self.name, ": action_on_server(",server_id,") reboot:" 
+                        self.logger.debug("action_on_server id='%s' reboot:", server_id)
                         #new_status = 'ACTIVE'
                     except Exception as e:
-                        print self.name, ": action_on_server(",server_id,") Exception while reboot:", e.get_error_message() 
+                        self.logger.error("action_on_server id='%s' Exception while reboot: %s",
+                                          server_id, e.get_error_message())
                 elif 'createImage' in req['action']:
                     self.create_image(dom, req)
                         
@@ -1747,14 +1840,15 @@ class host_thread(threading.Thread):
                 text = e.get_error_message()
                 new_status = "ERROR"
                 last_error = text
-                print self.name, ": action_on_server(",server_id,") Exception '", text
                 if 'LookupByUUIDString' in text or 'Domain not found' in text or 'No existe un dominio coincidente' in text:
-                    print self.name, ": action_on_server(",server_id,") Exception removed from host"
+                    self.logger.debug("action_on_server id='%s' Exception removed from host", server_id)
+                else:
+                    self.logger.error("action_on_server id='%s' Exception %s", server_id, text)
         #end of if self.test
         if new_status ==  None:
             return 1
 
-        print self.name, ": action_on_server(",server_id,") new status", new_status, last_error
+        self.logger.debug("action_on_server id='%s' new status=%s %s",server_id, new_status, last_error)
         UPDATE = {'progress':100, 'status':new_status}
         
         if new_status=='ERROR':
@@ -1762,7 +1856,7 @@ class host_thread(threading.Thread):
                 return -1 
             elif 'terminate' in req['action']:
                 #PUT a log in the database
-                print self.name, ": PANIC deleting server", server_id, last_error
+                self.logger.error("PANIC deleting server id='%s' %s", server_id, last_error)
                 self.db_lock.acquire()
                 self.db.new_row('logs', 
                             {'uuid':server_id, 'tenant_id':req['tenant_id'], 'related':'instances','level':'panic',
@@ -1795,7 +1889,7 @@ class host_thread(threading.Thread):
         ret = 0
         error_text=None
         if self.test:
-            print self.name, ": restore_iface '%s' %s" % (name, mac)
+            self.logger.debug("restore_iface '%s' %s", name, mac)
             return 0, None
         try:
             if not lib_conn:
@@ -1809,10 +1903,10 @@ class host_thread(threading.Thread):
             iface = conn.interfaceLookupByMACString(mac)
             iface.destroy()
             iface.create()
-            print self.name, ": restore_iface '%s' %s" % (name, mac)
+            self.logger.debug("restore_iface '%s' %s", name, mac)
         except host_thread.lvirt_module.libvirtError as e:
             error_text = e.get_error_message()
-            print self.name, ": restore_iface '%s' '%s' libvirt exception: %s" %(name, mac, error_text) 
+            self.logger.error("restore_iface '%s' '%s' libvirt exception: %s", name, mac, error_text)
             ret=-1
         finally:
             if lib_conn is None and conn is not None:
@@ -1855,14 +1949,14 @@ class host_thread(threading.Thread):
                 except paramiko.ssh_exception.SSHException as e:
                     image_status='ERROR'
                     error_text = e.args[0]
-                    print self.name, "': create_image(",server_id,") ssh Exception:", error_text
+                    self.logger.error("create_image id='%s' ssh Exception: %s", server_id, error_text)
                     if "SSH session not active" in error_text and retry==0:
                         self.ssh_connect()
                 except Exception as e:
                     image_status='ERROR'
                     error_text = str(e)
-                    print self.name, "': create_image(",server_id,") Exception:", error_text
-        
+                    self.logger.error("create_image id='%s' Exception: %s", server_id, error_text)
+
                 #TODO insert a last_error at database
         self.db_lock.acquire()
         self.db.update_rows('images', {'status':image_status, 'progress': 100, 'path':file_dst}, 
@@ -1880,14 +1974,14 @@ class host_thread(threading.Thread):
                                     WHERE={'port_id': port_id})
             self.db_lock.release()
             if r<0:
-                print self.name, ": edit_iface(",port_id,") DDBB error:", c
+                self.logger.error("edit_iface %s DDBB error: %s", port_id, c)
                 return
             elif r==0:
-                print self.name, ": edit_iface(",port_id,") por not found"
+                self.logger.error("edit_iface %s port not found", port_id)
                 return
             port=c[0]
             if port["model"]!="VF":
-                print self.name, ": edit_iface(",port_id,") ERROR model must be VF"
+                self.logger.error("edit_iface %s ERROR model must be VF", port_id)
                 return
             #create xml detach file
             xml=[]
@@ -1904,7 +1998,7 @@ class host_thread(threading.Thread):
                 dom = conn.lookupByUUIDString(port["instance_id"])
                 if old_net:
                     text="\n".join(xml)
-                    print self.name, ": edit_iface detaching SRIOV interface", text
+                    self.logger.debug("edit_iface detaching SRIOV interface " + text)
                     dom.detachDeviceFlags(text, flags=host_thread.lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
                 if new_net:
                     xml[-1] ="  <vlan>   <tag id='" + str(port['vlan']) + "'/>   </vlan>"
@@ -1912,30 +2006,19 @@ class host_thread(threading.Thread):
                     xml.append(self.pci2xml(port.get('vpci',None)) )
                     xml.append('</interface>')                
                     text="\n".join(xml)
-                    print self.name, ": edit_iface attaching SRIOV interface", text
+                    self.logger.debug("edit_iface attaching SRIOV interface " + text)
                     dom.attachDeviceFlags(text, flags=host_thread.lvirt_module.VIR_DOMAIN_AFFECT_LIVE)
                     
             except host_thread.lvirt_module.libvirtError as e:
                 text = e.get_error_message()
-                print self.name, ": edit_iface(",port["instance_id"],") libvirt exception:", text 
+                self.logger.error("edit_iface %s libvirt exception: %s", port["instance_id"], text)
                 
             finally:
                 if conn is not None: conn.close()
 
 
 def create_server(server, db, db_lock, only_of_ports):
-    #print "server"
-    #print "server"
-    #print server
-    #print "server"
-    #print "server"
-    #try:
-#            host_id = server.get('host_id', None)
     extended = server.get('extended', None)
-    
-#             print '----------------------'
-#             print json.dumps(extended, indent=4)
-    
     requirements={}
     requirements['numa']={'memory':0, 'proc_req_type': 'threads', 'proc_req_nb':0, 'port_list':[], 'sriov_list':[]}
     requirements['ram'] = server['flavor'].get('ram', 0)
@@ -2040,7 +2123,7 @@ def create_server(server, db, db_lock, only_of_ports):
                                        WHERE={'numa_id':numa_id,'instance_id': None, 'status':'ok'} )
         db_lock.release()
         if result <= 0:
-            print content
+            #print content
             return -1, content
     
         #convert rows to a dictionary indexed by core_id
@@ -2126,7 +2209,7 @@ def create_server(server, db, db_lock, only_of_ports):
             result, content = db.get_table(FROM='resources_port', SELECT=('id', 'pci', 'mac'),WHERE={'numa_id':numa_id,'root_id': port['port_id'], 'port_id': None, 'Mbps_used': 0} )
             db_lock.release()
             if result <= 0:
-                print content
+                #print content
                 return -1, content
             for row in content:
                 if row['id'] in used_sriov_ports or row['id']==port['port_id']:
@@ -2150,7 +2233,7 @@ def create_server(server, db, db_lock, only_of_ports):
             result, content = db.get_table(FROM='resources_port', SELECT=('id', 'pci', 'mac', 'Mbps'),WHERE={'numa_id':numa_id,'root_id': port['port_id'], 'port_id': None, 'Mbps_used': 0} )
             db_lock.release()
             if result <= 0:
-                print content
+                #print content
                 return -1, content
             port['Mbps_used'] = content[0]['Mbps']
             for row in content:
@@ -2168,7 +2251,6 @@ def create_server(server, db, db_lock, only_of_ports):
     #             print '2. SR-IOV assignation:'+json.dumps(requirements['sriov_list'], indent=4)
         
     server['host_id'] = host_id
-        
 
     #Generate dictionary for saving in db the instance resources
     resources = {}
@@ -2266,9 +2348,9 @@ def create_server(server, db, db_lock, only_of_ports):
         resources['extended']['devices'] = extended['devices']
     
 
-    print '===================================={'
-    print json.dumps(resources, indent=4)
-    print '====================================}'
+    # '===================================={'
+    #print json.dumps(resources, indent=4)
+    #print '====================================}'
     
     return 0, resources
 

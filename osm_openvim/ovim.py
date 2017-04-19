@@ -249,7 +249,9 @@ class ovim():
             thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=self.db_of,
                                     db_lock=self.db_lock, test=host_test_mode, image_path=self.config['image_path'],
                                     version=self.config['version'], host_id=host['uuid'], develop_mode=host_develop_mode,
-                                    develop_bridge_iface=host_develop_bridge_iface)
+                                    develop_bridge_iface=host_develop_bridge_iface,
+                                    logger_name=self.logger_name + ".host." + host['name'],
+                                    debug=self.config.get('log_level_host'))
             thread.start()
             self.config['host_threads'][host['uuid']] = thread
 
@@ -1342,7 +1344,8 @@ class ovim():
                                    db_lock=self.db_lock, test=host_test_mode,
                                    image_path=self.config['image_path'], version=self.config['version'],
                                    host_id='openvim_controller', develop_mode=host_develop_mode,
-                                   develop_bridge_iface=bridge_ifaces)
+                                   develop_bridge_iface=bridge_ifaces, logger_name=self.logger_name + ".host.controller",
+                                   debug=self.config.get('log_level_host'))
 
         self.config['host_threads']['openvim_controller'] = dhcp_host
         if not host_test_mode:
