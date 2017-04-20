@@ -3,8 +3,8 @@
 from setuptools import setup
 
 __name = 'osm_openvim'
-__version = '1.0.0'
-__description = 'OSM Openvim library'
+__version = open('OPENVIM_VERSION').read().strip()
+__description = 'OSM Openvim'
 __author = 'ETSI OSM'
 __author_email = 'alfonso.tiernosepulveda@telefonica.com'
 __maintainer = 'mirabal'
@@ -64,6 +64,9 @@ setup(name=__name,
       scripts=__scripts__,
       package_data={'osm_openvim': ['*']},
       include_package_data=True,
+      data_files = [('/etc/osm/', ['osm_openvim/openvimd.cfg']),
+                   ('/etc/systemd/system/', ['osm_openvim/osm-openvim.service']),
+                   ],
       install_requires=_req
       )
 

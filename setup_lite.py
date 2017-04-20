@@ -3,7 +3,7 @@
 from setuptools import setup
 
 __name = 'lib_osm_openvim'
-__version = '1.0.0'
+__version = open('OVIM_VERSION').read().strip()
 __description = 'OSM Openvim library'
 __author = 'ETSI OSM'
 __author_email = 'alfonso.tiernosepulveda@telefonica.com'
@@ -38,7 +38,7 @@ _req = [
     "paramiko",
 ]
 
-__scripts__ = ['openflow']
+__scripts__ = ['openflow-lib']
 
 setup(name=__name,
       version=__version,
