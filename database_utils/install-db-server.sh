@@ -13,6 +13,7 @@ function usage(){
     echo -e "     -h --help:  show this help"
     echo -e "     --forcedb:  reinstall vim_db DB, deleting previous database if exists and creating a new one"
     echo -e "     --no-install-packages: <deprecate> use this option to skip updating and installing the requires packages. This avoid wasting time if you are sure requires packages are present e.g. because of a previous installation"
+    echo -e "     --unistall: Delete DB, by default vim_db"
 
 
 }
@@ -59,6 +60,16 @@ function _init_db(){
     su $SUDO_USER -c "${DIRNAME}/init_vim_db.sh -u $DB_USER -p $DB_PASS -d ${DB_NAME}" || ! echo "Failed while initializing database" || exit 1
 }
 
+function _uninstall_db(){
+echo '
+    #################################################################
+    #####        DELETE DATABASE                                #####
+    #################################################################'
+    DBDELETEPARAM=""
+    [[ -n $QUIET_MODE ]] && DBDELETEPARAM="-f"
+    mysqladmin  --defaults-extra-file=$TEMPFILE -s drop ${DB_NAME} $DBDELETEPARAM || ! echo "Could not delete ${DB_NAME} database" || exit 1
+
+}
 function db_exists() {
     RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -o $1`
     if [ "$RESULT" == "$1" ]; then
@@ -77,6 +88,7 @@ DBPASSWD_PARAM=""
 QUIET_MODE=""
 FORCEDB=""
 NO_PACKAGES=""
+UNINSTALL=""
 while getopts ":U:P:d:u:p:hiq-:" o; do
     case "${o}" in
         U)
@@ -107,6 +119,7 @@ while getopts ":U:P:d:u:p:hiq-:" o; do
             [ "${OPTARG}" == "forcedb" ] && FORCEDB="y" && continue
             [ "${OPTARG}" == "quiet" ] && export QUIET_MODE=yes && export DEBIAN_FRONTEND=noninteractive && continue
             [ "${OPTARG}" == "no-install-packages" ] && export NO_PACKAGES=yes && continue
+            [ "${OPTARG}" == "uninstall" ] &&  UNINSTALL="y" && continue
             echo -e "Invalid option: '--$OPTARG'\nTry $0 --help for more information" >&2
             exit 1
             ;;
@@ -158,9 +171,17 @@ then
     done
 fi
 
+if [[ ! -z "$UNINSTALL" ]]
+then
+    _uninstall_db
+    exit
+fi
+
+
 if [[ -z "$NO_PACKAGES" ]]
 then
     _create_db
     _init_db
 fi
+
 
