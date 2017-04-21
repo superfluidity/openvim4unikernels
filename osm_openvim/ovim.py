@@ -34,16 +34,16 @@ version_date = "Apr 2017"
 database_version = "0.17"      #expected database schema version
 
 import threading
-import osm_openvim.vim_db as vim_db
+import vim_db
 import logging
 import imp
 import argparse
 from netaddr import IPNetwork
 from jsonschema import validate as js_v, exceptions as js_e
-import osm_openvim.host_thread as ht
-import osm_openvim.dhcp_thread as dt
-import osm_openvim.openflow_thread as oft
-import osm_openvim.openflow_conn as openflow_conn
+import host_thread as ht
+import dhcp_thread as dt
+import openflow_thread as oft
+import openflow_conn
 
 
 HTTP_Bad_Request =          400

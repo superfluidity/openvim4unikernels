@@ -23,7 +23,7 @@ function _create_db(){
     #################################################################
     #####               CREATE DATABASE                         #####
     #################################################################'
-    echo -e "\nCreating temporary file form MYSQL installation and initialization"
+    echo -e "\nCreating temporary file for MYSQL installation and initialization"
     TEMPFILE="$(mktemp -q --tmpdir "installopenvim.XXXXXX")"
     trap 'rm -f "$TEMPFILE"' EXIT
     chmod 0600 "$TEMPFILE"
@@ -35,8 +35,8 @@ function _create_db(){
             [[ -n $QUIET_MODE ]] && DBDELETEPARAM="-f"
             mysqladmin  --defaults-extra-file=$TEMPFILE -s drop ${DB_NAME} $DBDELETEPARAM || ! echo "Could not delete ${DB_NAME} database" || exit 1
             mysqladmin  --defaults-extra-file=$TEMPFILE -s create ${DB_NAME} || ! echo "1 Error creating ${DB_NAME} database" || exit 1
-            echo "CREATE USER $DB_USER@'localhost' IDENTIFIED BY '$DB_PASS';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "2 Failed while creating user vim at database"
-            echo "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO $DB_USER@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "3 Failed while creating user vim at database" || exit 1
+            echo "CREATE USER $DB_USER@'localhost' IDENTIFIED BY '$DB_PASS';"   | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "2 Failed while creating user ${DB_USER}"
+            echo "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO $DB_USER@'localhost';" | mysql --defaults-extra-file=$TEMPFILE -s || ! echo "3 Failed while granting privileges to user ${DB_USER} at database ${DB_NAME}" || exit 1
             echo " Database '${DB_NAME}' created, user $DB_USER password '$DB_PASS'"
         else
             echo "Database exists. Use option '--forcedb' to force the deletion of the existing one" && exit 1
