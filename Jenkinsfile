@@ -1,5 +1,7 @@
 pipeline {
-	agent any
+	agent {
+		label "pipeline"
+	}
 	stages {
 		stage("Build") {
 			agent {
@@ -23,10 +25,10 @@ pipeline {
 				unstash "deb-files"
 				sh '''
 					mkdir -p pool/openvim
-					mv ./build/*.deb pool/openvim/
-					mkdir -p dists/$RELEASE/openvim/binary-amd64/
-					apt-ftparchive packages pool/openvim > dists/$RELEASE/openvim/binary-amd64/Packages
-					gzip -9fk dists/$RELEASE/openvim/binary-amd64/Packages
+					mv .build/*.deb pool/openvim/
+					mkdir -p dists/$RELEASE/unstable/openvim/binary-amd64/
+					apt-ftparchive packages pool/openvim > dists/$RELEASE/unstable/openvim/binary-amd64/Packages
+					gzip -9fk dists/$RELEASE/unstable/openvim/binary-amd64/Packages
 					'''
 				archiveArtifacts artifacts: "dists/**,pool/openvim/*.deb"
 			}
