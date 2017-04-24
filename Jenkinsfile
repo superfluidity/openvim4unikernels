@@ -26,9 +26,9 @@ pipeline {
 				sh '''
 					mkdir -p pool/openvim
 					mv .build/*.deb pool/openvim/
-					mkdir -p dists/$RELEASE/unstable/openvim/binary-amd64/
-					apt-ftparchive packages pool/openvim > dists/$RELEASE/unstable/openvim/binary-amd64/Packages
-					gzip -9fk dists/$RELEASE/unstable/openvim/binary-amd64/Packages
+					mkdir -p dists/ReleaseOne/unstable/openvim/binary-amd64/
+					apt-ftparchive packages pool/openvim > dists/ReleaseOne/unstable/openvim/binary-amd64/Packages
+					gzip -9fk dists/ReleaseOne/unstable/openvim/binary-amd64/Packages
 					'''
 				archiveArtifacts artifacts: "dists/**,pool/openvim/*.deb"
 			}
