@@ -102,7 +102,7 @@ function _create_db(){
         || exit 1
     echo " Database '${DB_NAME}' created, user '$DB_USER' password '$DB_PASS'"
     DIRNAME=$(dirname $(readlink -f ${BASH_SOURCE[0]}))
-    ${DIRNAME}/init_mano_db.sh -u"$DB_USER" -p"$DB_PASS" -d"$DB_NAME" -P"$DB_PORT" $DB_HOST_PARAM \
+    ${DIRNAME}/init_vim_db.sh -u"$DB_USER" -p"$DB_PASS" -d"$DB_NAME" -P"$DB_PORT" $DB_HOST_PARAM \
         || ! echo "Error initializing database '$DB_NAME'" >&2 \
         || exit 1
 }
@@ -125,7 +125,7 @@ function _update_db(){
         || exit 1
     echo " Granted privileges to user '$DB_USER' password '$DB_PASS' to existing database '${DB_NAME}'"
     DIRNAME=$(dirname $(readlink -f ${BASH_SOURCE[0]}))
-    ${DIRNAME}/migrate_mano_db.sh -u"$DB_USER" -p"$DB_PASS" -d"$DB_NAME" -P"$DB_PORT" $DB_HOST_PARAM \
+    ${DIRNAME}/migrate_vim_db.sh -u"$DB_USER" -p"$DB_PASS" -d"$DB_NAME" -P"$DB_PORT" $DB_HOST_PARAM \
         || ! echo "Error updating database '$DB_NAME'" >&2 \
         || exit 1
 }
