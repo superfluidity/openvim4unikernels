@@ -12,7 +12,7 @@ clean:
 	find osm_openvim -name '*.pyo' -delete
 
 prepare_lite:
-	pip install --upgrade setuptools
+	pip install --user --upgrade setuptools
 	mkdir -p build
 	VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
 	VER2=$(shell git describe | cut -d- -f2); \
@@ -38,7 +38,7 @@ prepare_lite:
 	sed -i "s/import osm_openvim; print osm_openvim\.__path__\[0\]/import lib_osm_openvim; print lib_osm_openvim\.__path__\[0\]/g" build/lib_osm_openvim/database_utils/migrate_vim_db.sh
 
 prepare:
-	pip install --upgrade setuptools
+	pip install --user --upgrade setuptools
 	mkdir -p build
 	VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
 	VER2=$(shell git describe | cut -d- -f2); \
