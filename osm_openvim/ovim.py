@@ -36,7 +36,7 @@ database_version = "0.17"      #expected database schema version
 import threading
 import vim_db
 import logging
-import imp
+# import imp
 import argparse
 from netaddr import IPNetwork
 from jsonschema import validate as js_v, exceptions as js_e
@@ -371,27 +371,29 @@ class ovim():
                 module = temp_dict['of_controller']
 
             if module not in ovim.of_module:
-                module_info = imp.find_module(module)
-                of_conn_module = imp.load_module("OF_conn", *module_info)
-                ovim.of_module[module] = of_conn_module
+                for base in ("", "osm_openvim.", "lib_osm_openvim."):
+                    try:
+                        pkg = __import__(base + module)
+                        if base:
+                            of_conn_module = getattr(pkg, module)
+                        else:
+                            of_conn_module = pkg
+                        ovim.of_module[module] = of_conn_module
+                        self.logger.debug("Module load from {}".format(base + module))
+                        break
+                    except Exception as e:
+                        self.logger.warning("Module {} not found {}".format(base + module, e))
+                else:
+                    self.logger.error("Cannot open openflow controller module of type '%s'", module)
+                    raise ovimException("Cannot open openflow controller of type module '{}'"
+                                        "Revise it is installed".format(module),
+                                        HTTP_Internal_Server_Error)
             else:
                 of_conn_module = ovim.of_module[module]
-
-            try:
-                return of_conn_module.OF_conn(temp_dict)
-            except Exception as e:
-                self.logger.error("Cannot open the Openflow controller '%s': %s", type(e).__name__, str(e))
-                if module_info and module_info[0]:
-                    file.close(module_info[0])
-                raise ovimException("Cannot open the Openflow controller '{}': '{}'".format(type(e).__name__, str(e)),
-                                    HTTP_Internal_Server_Error)
-        except (IOError, ImportError) as e:
-            if module_info and module_info[0]:
-                file.close(module_info[0])
-            self.logger.error("Cannot open openflow controller module '%s'; %s: %s; revise 'of_controller' "
-                              "field of configuration file.", module, type(e).__name__, str(e))
-            raise ovimException("Cannot open openflow controller module '{}'; {}: {}; revise 'of_controller' "
-                                "field of configuration file.".format(module, type(e).__name__, str(e)),
+            return of_conn_module.OF_conn(temp_dict)
+        except Exception as e:
+            self.logger.error("Cannot open the Openflow controller '%s': %s", type(e).__name__, str(e))
+            raise ovimException("Cannot open the Openflow controller '{}': '{}'".format(type(e).__name__, str(e)),
                                 HTTP_Internal_Server_Error)
 
     def _create_ofc_thread(self, of_conn, ofc_uuid="Default"):
