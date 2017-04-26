@@ -12,7 +12,7 @@ clean:
 	find osm_openvim -name '*.pyo' -delete
 
 prepare_lite:
-	pip install --upgrade setuptools
+	pip install --user --upgrade setuptools
 	mkdir -p build
 	VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
 	VER2=$(shell git describe | cut -d- -f2); \
@@ -38,7 +38,7 @@ prepare_lite:
 	sed -i "s/import osm_openvim; print osm_openvim\.__path__\[0\]/import lib_osm_openvim; print lib_osm_openvim\.__path__\[0\]/g" build/lib_osm_openvim/database_utils/migrate_vim_db.sh
 
 prepare:
-	pip install --upgrade setuptools
+	pip install --user --upgrade setuptools
 	mkdir -p build
 	VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
 	VER2=$(shell git describe | cut -d- -f2); \
@@ -76,14 +76,14 @@ package_openvim: clean prepare
 	cd build && cp osm_openvim/scripts/python-osm-openvim.postinst deb_dist/osm-openvim*/debian/
 	cd build/deb_dist/osm-openvim* && dpkg-buildpackage -rfakeroot -uc -us
 	mkdir -p .build
-	cp build/deb_dist/python-*.deb ./build/
+	cp build/deb_dist/python-*.deb .build/
 
 package_lib: clean prepare_lite
 	#apt-get install -y python-stdeb
 	cd build && python setup.py --command-packages=stdeb.command sdist_dsc --with-python2=True
 	cd build/deb_dist/lib-osm-openvim* && dpkg-buildpackage -rfakeroot -uc -us
 	mkdir -p .build
-	cp build/deb_dist/python-*.deb ./build/
+	cp build/deb_dist/python-*.deb .build/
 
 package: clean_deb package_openvim package_lib
 
