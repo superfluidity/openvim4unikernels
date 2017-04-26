@@ -104,7 +104,7 @@ do
     screen_name="${om_component}"
     [[ -n "$option_screen_name" ]] && screen_name=$option_screen_name
     [ "${om_component}" == "flow" ] && om_cmd="floodlight.jar" && om_name="floodlight" && om_dir=$FLOODLIGHT_PATH
-    [ "${om_component}" == "vim" ]  && om_cmd="./openvimd.py"  && om_name="openvim   " && om_dir=${DIR_OM}
+    [ "${om_component}" == "vim" ]  && om_cmd="./openvimd"  && om_name="openvim   " && om_dir=${DIR_OM}
     #obtain PID of program
     component_id=`find_process_id "${om_cmd}" $option_screen_name`
     processes=$(echo $component_id | wc -w)

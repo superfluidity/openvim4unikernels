@@ -22,16 +22,10 @@
 # contact with: nfvlabs@tid.es
 ##
 
-'''
+"""
 This is the thread for the http server North API. 
 Two thread will be launched, with normal and administrative permissions.
-'''
-
-__author__ = "Alfonso Tierno, Leonardo Mirabal"
-__date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.10-r526"
-version_date = "Apr 2017"
-database_version = "0.17"      #expected database schema version
+"""
 
 import threading
 import vim_db
@@ -45,6 +39,11 @@ import dhcp_thread as dt
 import openflow_thread as oft
 import openflow_conn
 
+__author__ = "Alfonso Tierno, Leonardo Mirabal"
+__date__ = "$06-Feb-2017 12:07:15$"
+__version__ = "0.5.11-r527"
+version_date = "Apr 2017"
+database_version = "0.17"      #expected database schema version
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401

@@ -22,14 +22,11 @@
 # contact with: nfvlabs@tid.es
 ##
 
-'''
+"""
 This is the main program of openvim, it reads the configuration 
 and launches the rest of threads: http clients, openflow controller
 and host controllers  
-'''
-
-__author__ = "Alfonso Tierno"
-__date__ = "$10-jul-2014 12:07:15$"
+"""
 
 import osm_openvim.httpserver as httpserver
 import osm_openvim.auxiliary_functions as af
@@ -39,11 +36,14 @@ import time
 import yaml
 import os
 from jsonschema import validate as js_v, exceptions as js_e
-from vim_schema import config_schema
+from osm_openvim.vim_schema import config_schema
 import logging
 import logging.handlers as log_handlers
 import socket
 import osm_openvim.ovim as ovim
+
+__author__ = "Alfonso Tierno"
+__date__ = "$10-jul-2014 12:07:15$"
 
 global config_dic
 global logger
@@ -110,7 +110,7 @@ def load_configuration(configuration_file):
 def usage():
     print "Usage: ", sys.argv[0], "[options]"
     print "      -v|--version: prints current version"
-    print "      -c|--config FILE: loads the configuration file (default: openvimd.cfg)"
+    print "      -c|--config FILE: loads the configuration file (default: osm_openvim/openvimd.cfg)"
     print "      -h|--help: shows this help"
     print "      -p|--port PORT: changes port number and overrides the port number in the configuration file (default: 908)"
     print "      -P|--adminport PORT: changes admin port number and overrides the port number in the configuration file (default: not listen)"
@@ -130,7 +130,7 @@ if __name__=="__main__":
     )
     log_format_simple =  "%(asctime)s %(levelname)s  %(name)s %(filename)s:%(lineno)s %(message)s"
     log_formatter_simple = logging.Formatter(log_format_simple, datefmt='%Y-%m-%dT%H:%M:%S')
-    logging.basicConfig(format=log_format_simple, level= logging.DEBUG)
+    logging.basicConfig(format=log_format_simple, level=logging.DEBUG)
     logger = logging.getLogger('openvim')
     logger.setLevel(logging.DEBUG)
     try:
@@ -143,7 +143,7 @@ if __name__=="__main__":
 
     port=None
     port_admin = None
-    config_file = 'openvimd.cfg'
+    config_file = 'osm_openvim/openvimd.cfg'
     log_file = None
     db_name = None
 
