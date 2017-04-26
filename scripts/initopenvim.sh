@@ -116,11 +116,11 @@ then
     echo "deleting deployed vm"
     ${DIRvim}/openvim vm-delete -f | grep -q deleted && sleep 10 #give some time to get virtual machines deleted
     echo "Stopping openvim${screen_name_param}${openvim_param}"
-    $DIRNAME/service-openvim.sh stop${screen_name_param}${openvim_param} 
+    $DIRNAME/service-openvim stop${screen_name_param}${openvim_param}
     echo "Initializing databases $db_name"
     $DIRvim/database_utils/init_vim_db.sh -u vim -p vimpw -d $db_name
     echo "Starting openvim${screen_name_param}${openvim_param}"
-    $DIRNAME/service-openvim.sh start${screen_name_param}${openvim_param}
+    $DIRNAME/service-openvim start${screen_name_param}${openvim_param}
 
 elif [[ $action == delete-all ]] 
 then

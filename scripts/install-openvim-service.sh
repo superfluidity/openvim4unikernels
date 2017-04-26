@@ -134,8 +134,8 @@ mkdir -p /opt/openvim/logs
 ln -s -v /opt/openvim/openvimd.cfg /etc/default/openvimd.cfg  || echo "warning cannot create link '/etc/default/openvimd.cfg'"
 ln -s -v /opt/openvim/logs /var/log/openvim  || echo "warning cannot create link '/var/log/openvim'"
 ln -s -v /opt/openvim/openvim /usr/bin/openvim
-ln -s -v /opt/openvim/scripts/service-openvim.sh /usr/sbin/service-openvim
-ln -s -v /opt/openvim/scripts/openvim-report.sh /usr/bin/openvim-report
+ln -s -v /opt/openvim/scripts/service-openvim /usr/sbin/service-openvim
+ln -s -v /opt/openvim/scripts/openvim-report /usr/bin/openvim-report
 ln -s -v /opt/openvim/scripts/initopenvim.sh /usr/bin/initopenvim
 ln -s -v /opt/openvim/openflow /usr/bin/openflow
 
@@ -148,7 +148,7 @@ Description=openvim server
 
 [Service]
 User=${USER_OWNER}
-ExecStart=/opt/openvim/openvimd.py -c /opt/openvim/openvimd.cfg --log-file=/opt/openvim/logs/openvim.log
+ExecStart=/opt/openvim/openvimd -c /opt/openvim/osm_openvim/openvimd.cfg --log-file=/opt/openvim/logs/openvim.log
 Restart=always
 
 [Install]

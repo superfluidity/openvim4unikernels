@@ -62,7 +62,7 @@ function install_packages(){
 }
 
 function db_exists() {
-    RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -o $1`
+    RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -w $1`
     if [ "$RESULT" == "$1" ]; then
         echo " DB $1 exists"
         return 0
@@ -185,7 +185,7 @@ if [[ -z "$NOCLONE" ]]; then
     fi
     [[ -n "$FORCE" ]] && rm -rf $OPENVIM_BASEFOLDER #make idempotent
 else
-    HERE=$(realpath $(dirname $0))
+    HERE=$(dirname $(readlink -f ${BASH_SOURCE[0]}))
     OPENVIM_BASEFOLDER=$(dirname $HERE)
 fi
 
@@ -257,17 +257,6 @@ then
     done
 fi
 
-
-if [ -z "$NO_DB" ]; then
-    if [ -n "$QUIET_MODE" ]; then
-        DB_QUIET='-q'
-    fi
-
-    echo "!!!! install-db-server.sh: ${OPENVIM_BASEFOLDER}/scripts/install-db-server.sh -u $DBUSER $DBPASSWD_PARAM -n vim_db $DB_QUIET"
-    ${OPENVIM_BASEFOLDER}/scripts/install-db-server.sh -u $DBUSER $DBPASSWD_PARAM  $DB_QUIET  || exit 1
-fi
-
-
 if [[ -z "$NO_PACKAGES" ]]
 then
 
@@ -311,9 +300,18 @@ if [[ -z $NOCLONE ]]; then
 
     su $SUDO_USER -c "git clone ${GIT_URL} ${OPENVIM_BASEFOLDER}"
     su $SUDO_USER -c "cp ${OPENVIM_BASEFOLDER}/.gitignore-common ${OPENVIM_BASEFOLDER}/.gitignore"
-    [[ -z $DEVELOP ]] && su $SUDO_USER -c "git -C  ${OPENVIM_BASEFOLDER} checkout tags/v1.0.2"
+    [[ -z $DEVELOP ]] && su $SUDO_USER -c "git -C  ${OPENVIM_BASEFOLDER} checkout v2.0"
 fi
 
+DB_QUIET=''
+if [ -z "$NO_DB" ]; then
+    if [ -n "$QUIET_MODE" ]; then
+        DB_QUIET='-q'
+    fi
+
+    echo "!!!! install-db-server.sh: ${OPENVIM_BASEFOLDER}/database_utils/install-db-server.sh -U $DBUSER $DBPASSWD_PARAM $DB_QUIET"
+    ${OPENVIM_BASEFOLDER}/database_utils/install-db-server.sh -U $DBUSER $DBPASSWD_PARAM  $DB_QUIET  || exit 1
+fi
 
 
 if [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ]
@@ -363,10 +361,10 @@ then
     su $SUDO_USER -c 'rm -f ${HOME}/bin/get_dhcp_lease.sh'
     su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/openvim'   "'${HOME}/bin/openvim'
     su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/openflow'  "'${HOME}/bin/openflow'
-    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-openvim.sh'  "'${HOME}/bin/service-openvim'
-    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/initopenvim.sh'  "'${HOME}/bin/initopenvim'
-    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-floodlight.sh'  "'${HOME}/bin/service-floodlight'
-    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-opendaylight.sh'  "'${HOME}/bin/service-opendaylight'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-openvim'  "'${HOME}/bin/service-openvim'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/initopenvim'  "'${HOME}/bin/initopenvim'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-floodlight'  "'${HOME}/bin/service-floodlight'
+    su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/service-opendaylight'  "'${HOME}/bin/service-opendaylight'
     su $SUDO_USER -c "ln -s '${OPENVIM_BASEFOLDER}/scripts/get_dhcp_lease.sh'  "'${HOME}/bin/get_dhcp_lease.sh'
     
     #insert /home/<user>/bin in the PATH

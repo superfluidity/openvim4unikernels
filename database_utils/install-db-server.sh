@@ -156,7 +156,7 @@ echo '
 function db_exists(){  # (db_name, credential_file)
     # check credentials
     mysqlshow --defaults-extra-file="$2" >/dev/null  || exit 1
-    RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -o $1`
+    RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -w $1`
     if [ "$RESULT" == "$1" ]; then
         # echo " DB $1 exists"
         return 0
