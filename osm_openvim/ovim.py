@@ -378,19 +378,12 @@ class ovim():
                 module = temp_dict['of_controller']
 
             if module not in ovim.of_module:
-                for base in ("", "osm_openvim.", "lib_osm_openvim."):
-                    try:
-                        pkg = __import__(base + module)
-                        if base:
-                            of_conn_module = getattr(pkg, module)
-                        else:
-                            of_conn_module = pkg
-                        ovim.of_module[module] = of_conn_module
-                        self.logger.debug("Module load from {}".format(base + module))
-                        break
-                    except Exception as e:
-                        self.logger.warning("Module {} not found {}".format(base + module, e))
-                else:
+                try:
+                    pkg = __import__("osm_openvim." + module)
+                    of_conn_module = getattr(pkg, module)
+                    ovim.of_module[module] = of_conn_module
+                    self.logger.debug("Module load from {}".format("osm_openvim." + module))
+                except Exception as e:
                     self.logger.error("Cannot open openflow controller module of type '%s'", module)
                     raise ovimException("Cannot open openflow controller of type module '{}'"
                                         "Revise it is installed".format(module),

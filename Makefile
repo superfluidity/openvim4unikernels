@@ -36,6 +36,7 @@ prepare_lite:
 	sed -i "s/from osm_openvim/from lib_osm_openvim/g" build/openflow-lib
 	sed -i "s/import osm_openvim/import lib_osm_openvim/g" build/openflow-lib
 	sed -i "s/import osm_openvim; print osm_openvim\.__path__\[0\]/import lib_osm_openvim; print lib_osm_openvim\.__path__\[0\]/g" build/lib_osm_openvim/database_utils/migrate_vim_db.sh
+	sed -i "s/__import__(\"osm_openvim\.\"/__import__(\"lib_osm_openvim\.\"/g" build/lib_osm_openvim/ovim.py
 
 prepare:
 	pip install --user --upgrade setuptools
@@ -91,15 +92,11 @@ snap:
 	echo "Nothing to be done yet"
 
 install: clean build
+	#cd build/dist; pip install --user osm_openvim*
 	cd build/dist; pip install osm_openvim*
 
 install_lite: clean build_lite
+	#cd build/dist; pip install --user lib_osm_openvim-*
 	cd build/dist; pip install lib_osm_openvim-*
-
-
-
-
-
-
 
 
