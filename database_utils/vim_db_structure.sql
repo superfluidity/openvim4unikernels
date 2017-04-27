@@ -1,5 +1,5 @@
 /**
-* Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
+* Copyright 2017 Telefónica Investigación y Desarrollo, S.A.U.
 * This file is part of openvim
 * All Rights Reserved.
 *
@@ -19,11 +19,11 @@
 * contact with: nfvlabs@tid.es
 **/
 
--- MySQL dump 10.13  Distrib 5.5.43, for debian-linux-gnu (x86_64)
+-- MySQL dump 10.13  Distrib 5.7.17, for Linux (x86_64)
 --
--- Host: localhost    Database: vim_db
+-- Host: localhost    Database: {{vim_db}}
 -- ------------------------------------------------------
--- Server version	5.5.43-0ubuntu0.14.04.1
+-- Server version	5.7.17-0ubuntu0.16.04.1
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -37,14 +37,14 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Current Database: `vim_db`
+-- Current Database: `{{vim_db}}`
 --
 
-/*!40000 DROP DATABASE IF EXISTS `vim_db`*/;
+/*!40000 DROP DATABASE IF EXISTS `{{vim_db}}`*/;
 
-CREATE DATABASE /*!32312 IF NOT EXISTS*/ `vim_db` /*!40100 DEFAULT CHARACTER SET utf8 */;
+CREATE DATABASE /*!32312 IF NOT EXISTS*/ `{{vim_db}}` /*!40100 DEFAULT CHARACTER SET utf8 */;
 
-USE `vim_db`;
+USE `{{vim_db}}`;
 
 --
 -- Table structure for table `flavors`
@@ -55,7 +55,7 @@ DROP TABLE IF EXISTS `flavors`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `flavors` (
   `uuid` varchar(36) NOT NULL,
-  `name` varchar(64) NOT NULL,
+  `name` varchar(255) NOT NULL,
   `description` varchar(255) DEFAULT NULL,
   `disk` smallint(5) unsigned DEFAULT NULL,
   `ram` smallint(5) unsigned DEFAULT NULL,
@@ -121,8 +121,9 @@ DROP TABLE IF EXISTS `images`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `images` (
   `uuid` varchar(36) NOT NULL,
-  `path` varchar(100) NOT NULL,
-  `name` varchar(64) NOT NULL,
+  `path` varchar(255) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `checksum` varchar(32) DEFAULT NULL,
   `description` varchar(255) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `modified_at` timestamp NULL DEFAULT NULL,
@@ -155,7 +156,7 @@ CREATE TABLE `instance_devices` (
   KEY `FK_instance_devices_images` (`image_id`),
   CONSTRAINT `FK_instance_devices_images` FOREIGN KEY (`image_id`) REFERENCES `tenants_images` (`image_id`),
   CONSTRAINT `FK_instance_devices_instances` FOREIGN KEY (`instance_id`) REFERENCES `instances` (`uuid`) ON DELETE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -208,7 +209,7 @@ CREATE TABLE `logs` (
   `level` enum('panic','error','info','debug','verbose') NOT NULL,
   `description` varchar(200) NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -235,6 +236,7 @@ CREATE TABLE `nets` (
   `enable_dhcp` enum('true','false') NOT NULL DEFAULT 'false',
   `dhcp_first_ip` varchar(64) DEFAULT NULL,
   `dhcp_last_ip` varchar(64) DEFAULT NULL,
+  `gateway_ip` varchar(64) DEFAULT NULL,
   PRIMARY KEY (`uuid`),
   UNIQUE KEY `type_vlan` (`type`,`vlan`),
   UNIQUE KEY `physical` (`provider`),
@@ -261,7 +263,7 @@ CREATE TABLE `numas` (
   PRIMARY KEY (`id`),
   KEY `FK_numas_hosts` (`host_id`),
   CONSTRAINT `FK_numas_hosts` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`uuid`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -275,6 +277,7 @@ CREATE TABLE `of_flows` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(64) NOT NULL,
   `net_id` varchar(36) DEFAULT NULL,
+  `ofc_id` varchar(36) DEFAULT NULL,
   `priority` int(10) unsigned DEFAULT NULL,
   `vlan_id` smallint(5) unsigned DEFAULT NULL,
   `ingress_port` varchar(10) DEFAULT NULL,
@@ -284,8 +287,34 @@ CREATE TABLE `of_flows` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`),
   KEY `FK_of_flows_nets` (`net_id`),
-  CONSTRAINT `FK_of_flows_nets` FOREIGN KEY (`net_id`) REFERENCES `nets` (`uuid`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+  KEY `FK_of_flows_ofcs` (`ofc_id`),
+  CONSTRAINT `FK_of_flows_nets` FOREIGN KEY (`net_id`) REFERENCES `nets` (`uuid`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `FK_of_flows_ofcs` FOREIGN KEY (`ofc_id`) REFERENCES `ofcs` (`uuid`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `of_port_mappings`
+--
+
+DROP TABLE IF EXISTS `of_port_mappings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `of_port_mappings` (
+  `uuid` varchar(36) NOT NULL,
+  `ofc_id` varchar(36) DEFAULT NULL,
+  `region` varchar(64) DEFAULT NULL,
+  `compute_node` varchar(64) DEFAULT NULL,
+  `pci` varchar(50) DEFAULT NULL,
+  `switch_dpid` varchar(64) DEFAULT NULL,
+  `switch_port` varchar(64) DEFAULT NULL,
+  `switch_mac` char(18) DEFAULT NULL,
+  UNIQUE KEY `region_compute_node_pci` (`region`,`compute_node`,`pci`),
+  UNIQUE KEY `switch_dpid_switch_port` (`switch_dpid`,`switch_port`,`pci`),
+  UNIQUE KEY `switch_dpid_switch_mac` (`switch_dpid`,`switch_mac`,`pci`),
+  KEY `FK_of_port_mappings_ofcs` (`ofc_id`),
+  CONSTRAINT `FK_of_port_mappings_ofcs` FOREIGN KEY (`ofc_id`) REFERENCES `ofcs` (`uuid`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -302,7 +331,31 @@ CREATE TABLE `of_ports_pci_correspondence` (
   `switch_port` varchar(64) DEFAULT NULL,
   `switch_dpid` varchar(64) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `ofcs`
+--
+
+DROP TABLE IF EXISTS `ofcs`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `ofcs` (
+  `uuid` varchar(36) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `dpid` varchar(64) NOT NULL,
+  `ip` varchar(64) NOT NULL,
+  `port` int(5) NOT NULL,
+  `type` varchar(64) NOT NULL,
+  `version` varchar(12) DEFAULT NULL,
+  `user` varchar(64) DEFAULT NULL,
+  `password` varchar(64) DEFAULT NULL,
+  `last_error` varchar(255) DEFAULT NULL,
+  `status` enum('ACTIVE','INACTIVE','ERROR') DEFAULT 'ACTIVE',
+  `nets_with_same_vlan` enum('true','false') NOT NULL DEFAULT 'false',
+  PRIMARY KEY (`uuid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -322,10 +375,12 @@ CREATE TABLE `ports` (
   `Mbps` mediumint(8) unsigned DEFAULT NULL COMMENT 'In Mbits/s',
   `admin_state_up` enum('true','false') NOT NULL DEFAULT 'true',
   `status` enum('ACTIVE','DOWN','BUILD','ERROR') NOT NULL DEFAULT 'ACTIVE',
-  `type` enum('instance:bridge','instance:data','external') NOT NULL DEFAULT 'instance:bridge',
+  `type` enum('instance:bridge','instance:data','external','instance:ovs','controller:ovs') NOT NULL DEFAULT 'instance:bridge',
   `vlan` smallint(5) DEFAULT NULL COMMENT 'vlan of this SRIOV, or external port',
   `switch_port` varchar(64) DEFAULT NULL,
+  `switch_mac` varchar(18) DEFAULT NULL,
   `switch_dpid` varchar(64) DEFAULT NULL,
+  `ofc_id` varchar(36) DEFAULT NULL,
   `mac` char(18) DEFAULT NULL COMMENT 'mac address format XX:XX:XX:XX:XX:XX',
   `ip_address` varchar(64) DEFAULT NULL,
   `model` varchar(12) DEFAULT NULL COMMENT 'driver model for bridge ifaces; PF,VF,VFnotShared for data ifaces',
@@ -334,7 +389,9 @@ CREATE TABLE `ports` (
   KEY `FK_instance_ifaces_instances` (`instance_id`),
   KEY `FK_instance_ifaces_nets` (`net_id`),
   KEY `FK_ports_tenants` (`tenant_id`),
+  KEY `FK_port_ofc_id` (`ofc_id`),
   CONSTRAINT `FK_instance_ifaces_nets` FOREIGN KEY (`net_id`) REFERENCES `nets` (`uuid`),
+  CONSTRAINT `FK_port_ofc_id` FOREIGN KEY (`ofc_id`) REFERENCES `ofcs` (`uuid`),
   CONSTRAINT `FK_ports_instances` FOREIGN KEY (`instance_id`) REFERENCES `instances` (`uuid`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `FK_ports_tenants` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Bridge interfaces used by instances';
@@ -361,7 +418,7 @@ CREATE TABLE `resources_core` (
   KEY `FK_resources_core_numas` (`numa_id`),
   CONSTRAINT `FK_resources_core_instances` FOREIGN KEY (`instance_id`) REFERENCES `instances` (`uuid`),
   CONSTRAINT `FK_resources_core_numas` FOREIGN KEY (`numa_id`) REFERENCES `numas` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8 COMMENT='Contain an entry by thread (two entries per core) of all available cores. Threy will be free if instance_id is NULL';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Contain an entry by thread (two entries per core) of all available cores. Threy will be free if instance_id is NULL';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -381,7 +438,7 @@ CREATE TABLE `resources_mem` (
   KEY `FK_resources_mem_numas` (`numa_id`),
   CONSTRAINT `FK_resources_mem_instances` FOREIGN KEY (`instance_id`) REFERENCES `instances` (`uuid`) ON DELETE CASCADE,
   CONSTRAINT `FK_resources_mem_numas` FOREIGN KEY (`numa_id`) REFERENCES `numas` (`id`) ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8 COMMENT='Include the hugepages memory used by one instance (VM) in one host NUMA.';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Include the hugepages memory used by one instance (VM) in one host NUMA.';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -403,17 +460,21 @@ CREATE TABLE `resources_port` (
   `status` enum('ok','error','notused') NOT NULL DEFAULT 'ok',
   `Mbps_used` smallint(5) unsigned NOT NULL DEFAULT '0' COMMENT 'Speed bandwidth used when asigned',
   `switch_port` varchar(64) DEFAULT NULL,
+  `switch_mac` varchar(18) DEFAULT NULL,
   `switch_dpid` varchar(64) DEFAULT NULL,
+  `ofc_id` varchar(36) DEFAULT NULL,
   `mac` char(18) DEFAULT NULL COMMENT 'mac address format XX:XX:XX:XX:XX:XX',
   PRIMARY KEY (`id`),
   UNIQUE KEY `mac` (`mac`),
   UNIQUE KEY `port_id` (`port_id`),
   KEY `FK_resources_port_numas` (`numa_id`),
   KEY `FK_resources_port_instances` (`instance_id`),
+  KEY `FK_resource_ofc_id` (`ofc_id`),
+  CONSTRAINT `FK_resource_ofc_id` FOREIGN KEY (`ofc_id`) REFERENCES `ofcs` (`uuid`),
   CONSTRAINT `FK_resources_port_instances` FOREIGN KEY (`instance_id`) REFERENCES `instances` (`uuid`),
   CONSTRAINT `FK_resources_port_numas` FOREIGN KEY (`numa_id`) REFERENCES `numas` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `FK_resources_port_ports` FOREIGN KEY (`port_id`) REFERENCES `ports` (`uuid`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8 COMMENT='Contain NIC ports SRIOV and availabes, and current use. Every port contain several entries, one per port (root_id=NULL) and all posible SRIOV (root_id=id of port)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Contain NIC ports SRIOV and availabes, and current use. Every port contain several entries, one per port (root_id=NULL) and all posible SRIOV (root_id=id of port)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -467,7 +528,7 @@ CREATE TABLE `tenants_flavors` (
   KEY `FK__flavors` (`flavor_id`),
   CONSTRAINT `FK__flavors` FOREIGN KEY (`flavor_id`) REFERENCES `flavors` (`uuid`),
   CONSTRAINT `FK__tenants` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`uuid`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -486,7 +547,7 @@ CREATE TABLE `tenants_images` (
   KEY `FK_tenants_images_images` (`image_id`),
   CONSTRAINT `FK_tenants_images_images` FOREIGN KEY (`image_id`) REFERENCES `images` (`uuid`),
   CONSTRAINT `FK_tenants_images_tenants` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`uuid`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -500,13 +561,13 @@ CREATE TABLE `uuids` (
   `uuid` varchar(36) NOT NULL,
   `root_uuid` varchar(36) DEFAULT NULL COMMENT 'Some related UUIDs can be grouped by this field, so that they can be deleted at once',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `used_at` enum('flavors','hosts','images','instances','nets','ports','tenants') DEFAULT NULL COMMENT 'Table that uses this UUID',
+  `used_at` varchar(64) DEFAULT NULL COMMENT 'Table that uses this UUID',
   PRIMARY KEY (`uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Used to avoid UUID repetitions';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping routines for database 'vim_db'
+-- Dumping routines for database '{{vim_db}}'
 --
 /*!50003 DROP PROCEDURE IF EXISTS `GetAllAvailablePorts` */;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
@@ -917,17 +978,17 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2016-05-13 12:52:19
+-- Dump completed on 2017-04-28 14:12:17
 
 
 
 
 
--- MySQL dump 10.13  Distrib 5.5.43, for debian-linux-gnu (x86_64)
+-- MySQL dump 10.13  Distrib 5.7.17, for Linux (x86_64)
 --
--- Host: localhost    Database: vim_db
+-- Host: localhost    Database: {{vim_db}}
 -- ------------------------------------------------------
--- Server version	5.5.43-0ubuntu0.14.04.1
+-- Server version	5.7.17-0ubuntu0.16.04.1
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -946,7 +1007,7 @@ DELIMITER ;
 
 LOCK TABLES `schema_version` WRITE;
 /*!40000 ALTER TABLE `schema_version` DISABLE KEYS */;
-INSERT INTO `schema_version` VALUES (1,'0.1','0.2.00','insert schema_version; alter nets with last_error column','2015-05-05'),(2,'0.2','0.2.03','update Procedure UpdateSwitchPort','2015-05-06'),(3,'0.3','0.2.5','New Procedure GetAllAvailablePorts','2015-07-09'),(4,'0.4','0.3.1','Remove unique index VLAN at resources_port','2015-09-04'),(5,'0.5','0.4.1','Add ip_address to ports','2015-09-04'),(6,'0.6','0.4.2','Enlarging name at database','2016-02-01'),(7,'0.7','0.4.4','Add bind_net to net table','2016-02-12');
+INSERT INTO `schema_version` VALUES (1,'0.1','0.2.00','insert schema_version; alter nets with last_error column','2015-05-05'),(2,'0.2','0.2.03','update Procedure UpdateSwitchPort','2015-05-06'),(3,'0.3','0.2.5','New Procedure GetAllAvailablePorts','2015-07-09'),(4,'0.4','0.3.1','Remove unique index VLAN at resources_port','2015-09-04'),(5,'0.5','0.4.1','Add ip_address to ports','2015-09-04'),(6,'0.6','0.4.2','Enlarging name at database','2016-02-01'),(7,'0.7','0.4.4','Add bind_net to net table','2016-02-12'),(8,'0.8','0.4.10','add column checksum to images','2016-09-30'),(9,'0.9','0.5.1','increase length of columns path and name to 255 in table images, and change length of column name to 255 in table flavors','2017-01-10'),(10,'0.10','0.5.2','change ports type, adding instance:ovs','2017-02-01'),(11,'0.11','0.5.4','Add gateway_ip colum to nets','2017-02-13'),(12,'0.12','0.5.5','Add of_controller table','2017-02-17'),(13,'0.13','0.5.6','Add of_port_mapings table','2017-03-09'),(14,'0.14','0.5.7','Add switch_mac, ofc_id colum to ports and resources_port tables','2017-03-09'),(15,'0.15','0.5.8','Add ofc_id colum to of_flows','2017-03-15'),(16,'0.16','0.5.9','Add last_error and status colum to ofcs','2017-03-17'),(17,'0.17','0.5.10','Add pci to unique index dpid port/mac at of_port_mappings','2017-04-05');
 /*!40000 ALTER TABLE `schema_version` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -959,4 +1020,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2016-05-13 12:52:19
+-- Dump completed on 2017-04-28 14:12:17

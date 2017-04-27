@@ -27,31 +27,34 @@
 
 DBUSER="vim"
 DBPASS=""
-DBHOST="localhost"
+DEFAULT_DBPASS="vimpw"
+DBHOST=""
 DBPORT="3306"
 DBNAME="vim_db"
- 
+QUIET_MODE=""
+#TODO update it with the last database version
+LAST_DB_VERSION=17
+
 # Detect paths
 MYSQL=$(which mysql)
 AWK=$(which awk)
 GREP=$(which grep)
-DIRNAME=`dirname $0`
-HERE=$(realpath $(dirname $0))
 
 function usage(){
-    echo -e "Usage: $0 OPTIONS  [{openvim_version}]"
-    echo -e "  Upgrades/Downgrades openvim database preserving the content"
-    echo -e "   if openvim_version is not provided it tries to get from openvimd.py using relative path"
+    echo -e "Usage: $0 OPTIONS [version]"
+    echo -e "  Upgrades/Downgrades openvim database preserving the content."\
+            "If [version]  is not provided, it is upgraded to the last version"
     echo -e "  OPTIONS"
     echo -e "     -u USER  database user. '$DBUSER' by default. Prompts if DB access fails"
-    echo -e "     -p PASS  database password. 'No password' or 'vimpw' by default. Prompts if DB access fails"
+    echo -e "     -p PASS  database password. If missing it tries without and '$DEFAULT_DBPASS' password before prompting"
     echo -e "     -P PORT  database port. '$DBPORT' by default"
-    echo -e "     -h HOST  database host. '$DBHOST' by default"
+    echo -e "     -h HOST  database host. 'localhost' by default"
     echo -e "     -d NAME  database name. '$DBNAME' by default.  Prompts if DB access fails"
+    echo -e "     -q --quiet: Do not prompt for credentials and exit if cannot access to database"
     echo -e "     --help   shows this help"
 }
 
-while getopts ":u:p:P:h:d:-:" o; do
+while getopts ":u:p:P:h:d:q-:" o; do
     case "${o}" in
         u)
             DBUSER="$OPTARG"
@@ -68,88 +71,79 @@ while getopts ":u:p:P:h:d:-:" o; do
         h)
             DBHOST="$OPTARG"
             ;;
+        q)
+            export QUIET_MODE=yes
+            ;;
         -)
             [ "${OPTARG}" == "help" ] && usage && exit 0
-            echo "Invalid option: --$OPTARG" >&2 && usage  >&2
+            [ "${OPTARG}" == "quiet" ] && export QUIET_MODE=yes && continue
+            echo "Invalid option: '--$OPTARG'. Type --help for more information" >&2
             exit 1
-            ;; 
+            ;;
         \?)
-            echo "Invalid option: -$OPTARG" >&2 && usage  >&2
+            echo "Invalid option: '-$OPTARG'. Type --help for more information" >&2
             exit 1
             ;;
         :)
-            echo "Option -$OPTARG requires an argument." >&2 && usage  >&2
+            echo "Option '-$OPTARG' requires an argument. Type --help for more information" >&2
             exit 1
             ;;
         *)
             usage >&2
-            exit -1
+            exit 1
             ;;
     esac
 done
 shift $((OPTIND-1))
 
+DB_VERSION=$1
 
-#GET OPENVIM VERSION
-OPENVIM_VER="$1"
-if [ -z "$OPENVIM_VER" ]
-then
-    OVIM_PATH=$(dirname $HERE)
-    OPENVIM_VER=`python ${OVIM_PATH}/ovim.py -v 2> /dev/null`
-    OPENVIM_VER=${OPENVIM_VER%%-r*}
-    OPENVIM_VER=${OPENVIM_VER##*version }
-    echo "    Detected openvim version $OPENVIM_VER"
+if [ -n "$DB_VERSION" ] ; then
+    # check it is a number and an allowed one
+    [ "$DB_VERSION" -eq "$DB_VERSION" ] 2>/dev/null || 
+        ! echo "parameter 'version' requires a integer value" >&2 || exit 1
+    if [ "$DB_VERSION" -lt 0 ] || [ "$DB_VERSION" -gt "$LAST_DB_VERSION" ] ; then
+        echo "parameter 'version' requires a valid database version between '0' and '$LAST_DB_VERSION'"\
+             "If you need an upper version, get a newer version of this script '$0'" >&2
+        exit 1
+    fi
+else
+    DB_VERSION="$LAST_DB_VERSION"
 fi
-VERSION_1=`echo $OPENVIM_VER | cut -f 1 -d"."`
-VERSION_2=`echo $OPENVIM_VER | cut -f 2 -d"."`
-VERSION_3=`echo $OPENVIM_VER | cut -f 3 -d"."`
-if ! [ "$VERSION_1" -ge 0 -a "$VERSION_2" -ge 0 -a "$VERSION_3" -ge 0 ] 2>/dev/null
-then 
-    [ -n "$1" ] && echo "Invalid openvim version '$1', expected 'X.X.X'" >&2
-    [ -z "$1" ] && echo "Can not get openvim version" >&2
-    exit -1
-fi
-OPENVIM_VER_NUM=`printf "%d%03d%03d" ${VERSION_1} ${VERSION_2} ${VERSION_3}`
 
-#Creating temporary file
-TEMPFILE="$(mktemp -q --tmpdir "migratemanodb.XXXXXX")"
+# Creating temporary file
+TEMPFILE="$(mktemp -q --tmpdir "migratevimdb.XXXXXX")"
 trap 'rm -f "$TEMPFILE"' EXIT
 chmod 0600 "$TEMPFILE"
-
-#if password is missing, before prompting for it try without password and with "manopw"
-DBHOST_="-h$DBHOST"
-DBPORT_="-P$DBPORT"
 DEF_EXTRA_FILE_PARAM="--defaults-extra-file=$TEMPFILE"
-if [ -z "${DBPASS}" ]
-then
-    password_ok=""
-    echo -e "[client]\nuser='${DBUSER}'\npassword='vimpw'" > "$TEMPFILE"
-    mysql --defaults-extra-file="$TEMPFILE" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1 && DBPASS="vimpw"
-    echo -e "[client]\nuser='${DBUSER}'\npassword=''" > "$TEMPFILE"
-    mysql --defaults-extra-file="$TEMPFILE" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1 && DBPASS=""
-fi
-echo -e "[client]\nuser='${DBUSER}'\npassword='${DBPASS}'" > "$TEMPFILE"
+echo -e "[client]\n user='${DBUSER}'\n password='$DBPASS'\n host='$DBHOST'\n port='$DBPORT'" > "$TEMPFILE"
 
-#check and ask for database user password
-while ! mysql "$DEF_EXTRA_FILE_PARAM" $DBHOST_ $DBPORT_ $DBNAME -e "quit" >/dev/null 2>&1
+# Check and ask for database user password
+FIRST_TRY="yes"
+while ! DB_ERROR=`mysql "$DEF_EXTRA_FILE_PARAM" $DBNAME -e "quit" 2>&1 >/dev/null`
 do
-        [ -n "$logintry" ] && echo -e "\nInvalid database credentials!!!. Try again (Ctrl+c to abort)"
-        [ -z "$logintry" ] &&  echo -e "\nProvide database name and credentials"
-        read -e -p "mysql database name($DBNAME): " KK
-        [ -n "$KK" ] && DBNAME="$KK"
-        read -e -p "mysql user($DBUSER): " KK
-        [ -n "$KK" ] && DBUSER="$KK"
-        read -e -s -p "mysql password: " DBPASS
-        echo -e "[client]\nuser='${DBUSER}'\npassword='${DBPASS}'" > "$TEMPFILE"
-        logintry="yes"
-        echo
+    # if password is not provided, try silently with $DEFAULT_DBPASS before exit or prompt for credentials
+    [[ -n "$FIRST_TRY" ]] && [[ -z "$DBPASS" ]] && DBPASS="$DEFAULT_DBPASS" &&
+        echo -e "[client]\n user='${DBUSER}'\n password='$DBPASS'\n host='$DBHOST'\n port='$DBPORT'" > "$TEMPFILE" &&
+        continue
+    echo "$DB_ERROR"
+    [[ -n "$QUIET_MODE" ]] && echo -e "Invalid database credentials!!!" >&2 && exit 1
+    echo -e "Provide database name and credentials (Ctrl+c to abort):"
+    read -e -p "    mysql database name($DBNAME): " KK
+    [ -n "$KK" ] && DBNAME="$KK"
+    read -e -p "    mysql user($DBUSER): " KK
+    [ -n "$KK" ] && DBUSER="$KK"
+    read -e -s -p "    mysql password: " DBPASS
+    echo -e "[client]\n user='${DBUSER}'\n password='$DBPASS'\n host='$DBHOST'\n port='$DBPORT'" > "$TEMPFILE"
+    FIRST_TRY=""
+    echo
 done
 
-DBCMD="mysql $DEF_EXTRA_FILE_PARAM $DBHOST_ $DBPORT_ $DBNAME"
+DBCMD="mysql $DEF_EXTRA_FILE_PARAM $DBNAME"
 #echo DBCMD $DBCMD
 
 #GET DATABASE VERSION
-#check that the database seems a openvim database
+# check that the database seems a openvim database
 if ! echo -e "show create table instances;\nshow create table numas" | $DBCMD >/dev/null 2>&1
 then
     echo "    database $DBNAME does not seem to be an openvim database" >&2
@@ -160,37 +154,41 @@ if ! echo 'show create table schema_version;' | $DBCMD >/dev/null 2>&1
 then
     DATABASE_VER="0.0"
     DATABASE_VER_NUM=0
-else 
-    DATABASE_VER_NUM=`echo "select max(version_int) from schema_version;" | $DBCMD | tail -n+2` 
+else
+    DATABASE_VER_NUM=`echo "select max(version_int) from schema_version;" | $DBCMD | tail -n+2`
     DATABASE_VER=`echo "select version from schema_version where version_int='$DATABASE_VER_NUM';" | $DBCMD | tail -n+2` 
-    [ "$DATABASE_VER_NUM" -lt 0 -o "$DATABASE_VER_NUM" -gt 100 ] && echo "    Error can not get database version ($DATABASE_VER?)" >&2 && exit -1
+    [ "$DATABASE_VER_NUM" -lt 0 -o "$DATABASE_VER_NUM" -gt 100 ] &&
+        echo "    Error can not get database version ($DATABASE_VER?)" >&2 && exit -1
     #echo "_${DATABASE_VER_NUM}_${DATABASE_VER}"
 fi
 
+[ "$DATABASE_VER_NUM" -gt "$LAST_DB_VERSION" ] &&
+    echo "Database has been upgraded with a newer version of this script. Use this version to downgrade" >&2 &&
+    exit 1
 
 #GET DATABASE TARGET VERSION
-DATABASE_TARGET_VER_NUM=0
-[ $OPENVIM_VER_NUM -gt 1091 ] && DATABASE_TARGET_VER_NUM=1   #>0.1.91 =>  1
-[ $OPENVIM_VER_NUM -ge 2003 ] && DATABASE_TARGET_VER_NUM=2   #0.2.03  =>  2
-[ $OPENVIM_VER_NUM -ge 2005 ] && DATABASE_TARGET_VER_NUM=3   #0.2.5   =>  3
-[ $OPENVIM_VER_NUM -ge 3001 ] && DATABASE_TARGET_VER_NUM=4   #0.3.1   =>  4
-[ $OPENVIM_VER_NUM -ge 4001 ] && DATABASE_TARGET_VER_NUM=5   #0.4.1   =>  5
-[ $OPENVIM_VER_NUM -ge 4002 ] && DATABASE_TARGET_VER_NUM=6   #0.4.2   =>  6
-[ $OPENVIM_VER_NUM -ge 4005 ] && DATABASE_TARGET_VER_NUM=7   #0.4.5   =>  7
-[ $OPENVIM_VER_NUM -ge 4010 ] && DATABASE_TARGET_VER_NUM=8   #0.4.10  =>  8
-[ $OPENVIM_VER_NUM -ge 5001 ] && DATABASE_TARGET_VER_NUM=9   #0.5.1   =>  9
-[ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=10  #0.5.2   => 10
-[ $OPENVIM_VER_NUM -ge 5004 ] && DATABASE_TARGET_VER_NUM=11  #0.5.4   => 11
-[ $OPENVIM_VER_NUM -ge 5005 ] && DATABASE_TARGET_VER_NUM=12  #0.5.5   => 12
-[ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 13
-[ $OPENVIM_VER_NUM -ge 5007 ] && DATABASE_TARGET_VER_NUM=14  #0.5.7   => 14
-[ $OPENVIM_VER_NUM -ge 5008 ] && DATABASE_TARGET_VER_NUM=15  #0.5.8   => 15
-[ $OPENVIM_VER_NUM -ge 5009 ] && DATABASE_TARGET_VER_NUM=16  #0.5.9   => 16
-[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
+#DB_VERSION=0
+#[ $OPENVIM_VER_NUM -gt 1091 ] && DATABASE_TARGET_VER_NUM=1   #>0.1.91 =>  1
+#[ $OPENVIM_VER_NUM -ge 2003 ] && DATABASE_TARGET_VER_NUM=2   #0.2.03  =>  2
+#[ $OPENVIM_VER_NUM -ge 2005 ] && DATABASE_TARGET_VER_NUM=3   #0.2.5   =>  3
+#[ $OPENVIM_VER_NUM -ge 3001 ] && DATABASE_TARGET_VER_NUM=4   #0.3.1   =>  4
+#[ $OPENVIM_VER_NUM -ge 4001 ] && DATABASE_TARGET_VER_NUM=5   #0.4.1   =>  5
+#[ $OPENVIM_VER_NUM -ge 4002 ] && DATABASE_TARGET_VER_NUM=6   #0.4.2   =>  6
+#[ $OPENVIM_VER_NUM -ge 4005 ] && DATABASE_TARGET_VER_NUM=7   #0.4.5   =>  7
+#[ $OPENVIM_VER_NUM -ge 4010 ] && DATABASE_TARGET_VER_NUM=8   #0.4.10  =>  8
+#[ $OPENVIM_VER_NUM -ge 5001 ] && DATABASE_TARGET_VER_NUM=9   #0.5.1   =>  9
+#[ $OPENVIM_VER_NUM -ge 5002 ] && DATABASE_TARGET_VER_NUM=10  #0.5.2   => 10
+#[ $OPENVIM_VER_NUM -ge 5004 ] && DATABASE_TARGET_VER_NUM=11  #0.5.4   => 11
+#[ $OPENVIM_VER_NUM -ge 5005 ] && DATABASE_TARGET_VER_NUM=12  #0.5.5   => 12
+#[ $OPENVIM_VER_NUM -ge 5006 ] && DATABASE_TARGET_VER_NUM=13  #0.5.6   => 13
+#[ $OPENVIM_VER_NUM -ge 5007 ] && DATABASE_TARGET_VER_NUM=14  #0.5.7   => 14
+#[ $OPENVIM_VER_NUM -ge 5008 ] && DATABASE_TARGET_VER_NUM=15  #0.5.8   => 15
+#[ $OPENVIM_VER_NUM -ge 5009 ] && DATABASE_TARGET_VER_NUM=16  #0.5.9   => 16
+#[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
 #TODO ... put next versions here
 
 function upgrade_to_1(){
-    echo "    upgrade database from version 0.0 to version 0.1"
+    # echo "    upgrade database from version 0.0 to version 0.1"
     echo "      CREATE TABLE \`schema_version\`"
     echo "CREATE TABLE \`schema_version\` (
 	\`version_int\` INT NOT NULL COMMENT 'version as a number. Must not contain gaps',
@@ -210,14 +208,14 @@ function upgrade_to_1(){
          ADD COLUMN \`last_error\` VARCHAR(200) NULL AFTER \`status\`;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_1(){
-    echo "    downgrade database from version 0.1 to version 0.0"
+    # echo "    downgrade database from version 0.1 to version 0.0"
     echo "      ALTER TABLE \`nets\` DROP COLUMN \`last_error\`"
     echo "ALTER TABLE \`nets\` DROP COLUMN \`last_error\`;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "      DROP TABLE \`schema_version\`"
     echo "DROP TABLE \`schema_version\`;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function upgrade_to_2(){
-    echo "    upgrade database from version 0.1 to version 0.2"
+    # echo "    upgrade database from version 0.1 to version 0.2"
     echo "      ALTER TABLE \`of_ports_pci_correspondence\` \`resources_port\` \`ports\` ADD COLUMN \`switch_dpid\`"
     for table in of_ports_pci_correspondence resources_port ports
     do
@@ -255,7 +253,7 @@ function upgrade_to_2(){
 	 VALUES (2, '0.2', '0.2.03', 'update Procedure UpdateSwitchPort', '2015-05-06');" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function upgrade_to_3(){
-    echo "    upgrade database from version 0.2 to version 0.3"
+    # echo "    upgrade database from version 0.2 to version 0.3"
     echo "     change size of source_name at table resources_port"
     echo "ALTER TABLE resources_port CHANGE COLUMN source_name source_name VARCHAR(24) NULL DEFAULT NULL AFTER port_id;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "     CREATE PROCEDURE GetAllAvailablePorts"
@@ -293,7 +291,7 @@ function upgrade_to_3(){
 }
 
 function upgrade_to_4(){
-    echo "    upgrade database from version 0.3 to version 0.4"
+    # echo "    upgrade database from version 0.3 to version 0.4"
     echo "     remove unique VLAN index at 'resources_port', 'ports'"
     echo "ALTER TABLE resources_port DROP INDEX vlan_switch_port;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE ports          DROP INDEX vlan_switch_port;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -306,7 +304,7 @@ function upgrade_to_4(){
 
 function upgrade_to_X(){
     #TODO, this change of foreign key does not work
-    echo "    upgrade database from version 0.X to version 0.X"
+    # echo "    upgrade database from version 0.X to version 0.X"
     echo "ALTER TABLE instances DROP FOREIGN KEY FK_instances_flavors, DROP INDEX FK_instances_flavors,
           DROP FOREIGN KEY FK_instances_images, DROP INDEX FK_instances_flavors,;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1 
     echo "ALTER TABLE instances
@@ -315,7 +313,7 @@ function upgrade_to_X(){
 }
 
 function downgrade_from_2(){
-    echo "    downgrade database from version 0.2 to version 0.1"
+    # echo "    downgrade database from version 0.2 to version 0.1"
     echo "      UPDATE procedure UpdateSwitchPort"
     echo "DROP PROCEDURE IF EXISTS UpdateSwitchPort;
     delimiter //
@@ -346,7 +344,7 @@ function downgrade_from_2(){
     echo "DELETE FROM \`schema_version\` WHERE \`version_int\` = '2';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_3(){
-    echo "    downgrade database from version 0.3 to version 0.2"
+    # echo "    downgrade database from version 0.3 to version 0.2"
     echo "     change back size of source_name at table resources_port"
     echo "ALTER TABLE resources_port CHANGE COLUMN source_name source_name VARCHAR(20) NULL DEFAULT NULL AFTER port_id;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "      DROP PROCEDURE GetAllAvailablePorts"
@@ -354,7 +352,7 @@ function downgrade_from_3(){
     echo "DELETE FROM schema_version WHERE version_int = '3';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_4(){
-    echo "    downgrade database from version 0.4 to version 0.3"
+    # echo "    downgrade database from version 0.4 to version 0.3"
     echo "     adding back unique index VLAN at 'resources_port','ports'"
     echo "ALTER TABLE resources_port ADD COLUMN vlan SMALLINT(5) UNSIGNED NULL DEFAULT NULL  AFTER Mbps_used;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "UPDATE resources_port SET vlan= 99+id-root_id WHERE id != root_id;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -368,20 +366,20 @@ function downgrade_from_4(){
 
 
 function upgrade_to_5(){
-    echo "    upgrade database from version 0.4 to version 0.5"
+    # echo "    upgrade database from version 0.4 to version 0.5"
     echo "     add 'ip_address' to ports'"
     echo "ALTER TABLE ports ADD COLUMN ip_address VARCHAR(64) NULL DEFAULT NULL AFTER mac;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (5, '0.5', '0.4.1', 'Add ip_address to ports', '2015-09-04');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_5(){
-    echo "    downgrade database from version 0.5 to version 0.4"
+    # echo "    downgrade database from version 0.5 to version 0.4"
     echo "     removing 'ip_address' from 'ports'"
     echo "ALTER TABLE ports DROP COLUMN ip_address;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '5';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 function upgrade_to_6(){
-    echo "    upgrade database from version 0.5 to version 0.6"
+    # echo "    upgrade database from version 0.5 to version 0.6"
     echo "      Change enalarge name, description to 255 at all database"
     for table in flavors images instances tenants
     do
@@ -407,7 +405,7 @@ function upgrade_to_6(){
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (6, '0.6', '0.4.2', 'Enlarging name at database', '2016-02-01');" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_6(){
-    echo "    downgrade database from version 0.6 to version 0.5"
+    # echo "    downgrade database from version 0.6 to version 0.5"
     echo "      Change back name,description to shorter length at all database"
     for table in flavors images instances tenants
     do
@@ -434,7 +432,7 @@ function downgrade_from_6(){
 }
 
 function upgrade_to_7(){
-    echo "    upgrade database from version 0.6 to version 0.7"
+    # echo "    upgrade database from version 0.6 to version 0.7"
     echo "     add 'bind_net','bind_type','cidr','enable_dhcp' to 'nets'"
     echo "ALTER TABLE nets ADD COLUMN cidr VARCHAR(64) NULL DEFAULT NULL AFTER bind, ADD COLUMN enable_dhcp ENUM('true','false') NOT NULL DEFAULT 'false' after cidr, ADD COLUMN dhcp_first_ip VARCHAR(64) NULL DEFAULT NULL AFTER enable_dhcp, ADD COLUMN dhcp_last_ip VARCHAR(64) NULL DEFAULT NULL AFTER dhcp_first_ip;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE nets CHANGE COLUMN bind provider VARCHAR(36) NULL DEFAULT NULL AFTER vlan;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -442,7 +440,7 @@ function upgrade_to_7(){
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (7, '0.7', '0.4.5', 'Add bind_net to net table', '2016-02-12');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_7(){
-    echo "    downgrade database from version 0.7 to version 0.6"
+    # echo "    downgrade database from version 0.7 to version 0.6"
     echo "     removing 'bind_net','bind_type','cidr','enable_dhcp' from 'nets'"
     echo "ALTER TABLE nets CHANGE COLUMN provider bind NULL DEFAULT NULL AFTER vlan;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE nets DROP COLUMN cidr, DROP COLUMN enable_dhcp, DROP COLUMN bind_net, DROP COLUMN bind_type, DROP COLUMN dhcp_first_ip, DROP COLUMN dhcp_last_ip;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -450,27 +448,27 @@ function downgrade_from_7(){
 }
 
 function upgrade_to_8(){
-    echo "    upgrade database from version 0.7 to version 0.8"
+    # echo "    upgrade database from version 0.7 to version 0.8"
     echo "     add column 'checksum' to 'images'"
     echo "ALTER TABLE images ADD COLUMN checksum VARCHAR(32) NULL AFTER name;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (8, '0.8', '0.4.10', 'add column checksum to images', '2016-09-30');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_8(){
-    echo "    downgrade database from version 0.8 to version 0.7"
+    # echo "    downgrade database from version 0.8 to version 0.7"
     echo "     remove column 'checksum' from 'images'"
     echo "ALTER TABLE images DROP COLUMN checksum;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '8';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 function upgrade_to_9(){
-    echo "    upgrade database from version 0.8 to version 0.9"
+    # echo "    upgrade database from version 0.8 to version 0.9"
     echo "     change length of columns 'path' and 'name' to 255 in table 'images', and change length of column 'name' to 255 in table 'flavors'"
     echo "ALTER TABLE images CHANGE COLUMN path path VARCHAR(255) NOT NULL AFTER uuid, CHANGE COLUMN name name VARCHAR(255) NOT NULL AFTER path;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE flavors CHANGE COLUMN name name VARCHAR(255) NOT NULL AFTER uuid;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (9, '0.9', '0.5.1', 'increase length of columns path and name to 255 in table images, and change length of column name to 255 in table flavors', '2017-01-10');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_9(){
-    echo "    downgrade database from version 0.9 to version 0.8"
+    # echo "    downgrade database from version 0.9 to version 0.8"
     echo "     change length of columns 'path' and 'name' to 100 and 64 in table 'images'"
     echo "ALTER TABLE images CHANGE COLUMN path path VARCHAR(100) NOT NULL AFTER uuid, CHANGE COLUMN name name VARCHAR(64) NOT NULL AFTER path;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE flavors CHANGE COLUMN name name VARCHAR(64) NOT NULL AFTER uuid;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -478,32 +476,32 @@ function downgrade_from_9(){
 }
 
 function upgrade_to_10(){
-    echo "    upgrade database from version 0.9 to version 0.10"
+    # echo "    upgrade database from version 0.9 to version 0.10"
     echo "     change types at 'ports'"
     echo "ALTER TABLE ports CHANGE COLUMN type type ENUM('instance:bridge','instance:data','external','instance:ovs','controller:ovs') NOT NULL DEFAULT 'instance:bridge' AFTER status;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (10, '0.10', '0.5.2', 'change ports type, adding instance:ovs', '2017-02-01');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_10(){
-    echo "    downgrade database from version 0.10 to version 0.9"
+    # echo "    downgrade database from version 0.10 to version 0.9"
     echo "     change back types at 'ports'"
     echo "ALTER TABLE ports CHANGE COLUMN type type ENUM('instance:bridge','instance:data','external') NOT NULL DEFAULT 'instance:bridge' AFTER status;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '10';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 function upgrade_to_11(){
-    echo "    upgrade database from version 0.10 to version 0.11"
+    # echo "    upgrade database from version 0.10 to version 0.11"
     echo "    Add gateway_ip colum to 'nets'"
     echo "ALTER TABLE nets ADD COLUMN gateway_ip VARCHAR(64) NULL DEFAULT NULL AFTER dhcp_last_ip;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (11, '0.11', '0.5.4', 'Add gateway_ip colum to nets', '2017-02-13');"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function downgrade_from_11(){
-    echo "    downgrade database from version 0.11 to version 0.10"
+    # echo "    downgrade database from version 0.11 to version 0.10"
     echo "    Delete gateway_ip colum from 'nets'"
     echo "ALTER TABLE nets DROP COLUMN gateway_ip;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '11';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 function upgrade_to_12(){
-    echo "    upgrade database from version 0.11 to version 0.12"
+    # echo "    upgrade database from version 0.11 to version 0.12"
     echo "    Create of_controller table "
     echo "CREATE TABLE ofcs (
 	uuid VARCHAR(36) NOT NULL,
@@ -525,7 +523,7 @@ ENGINE=InnoDB;"| $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 function downgrade_from_12(){
-    echo "    downgrade database from version 0.12 to version 0.11"
+    # echo "    downgrade database from version 0.12 to version 0.11"
     echo "    Delete ofcs table"
     echo "DROP TABLE ofcs;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "ALTER TABLE uuids  CHANGE COLUMN used_at used_at ENUM('flavors', 'hosts', 'images', 'instances', 'nets', 'ports', 'tenants') NULL DEFAULT NULL COMMENT 'Table that uses this UUID' ;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -533,7 +531,7 @@ function downgrade_from_12(){
 }
 
 function upgrade_to_13(){
-    echo "    upgrade database from version 0.12 to version 0.13"
+    # echo "    upgrade database from version 0.12 to version 0.13"
     echo "    Create of_port_mapings table "
     echo "CREATE TABLE of_port_mappings (
 	uuid VARCHAR(36) NOT NULL,
@@ -555,14 +553,14 @@ function upgrade_to_13(){
 }
 
 function downgrade_from_13(){
-    echo "    downgrade database from version 0.13 to version 0.12"
+    # echo "    downgrade database from version 0.13 to version 0.12"
     echo "    Delete of_port_mappings table"
     echo "DROP TABLE of_port_mappings;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '13';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 function upgrade_to_14(){
-    echo "    upgrade database from version 0.13 to version 0.14"
+    # echo "    upgrade database from version 0.13 to version 0.14"
     echo "    Add switch_mac, ofc_id colum to 'ports' and 'resources_port'"
     echo "ALTER TABLE ports
 	ADD COLUMN switch_mac VARCHAR(18) NULL DEFAULT NULL AFTER switch_port,
@@ -576,7 +574,7 @@ function upgrade_to_14(){
 }
 
 function downgrade_from_14(){
-    echo "    downgrade database from version 0.14 to version 0.13"
+    # echo "    downgrade database from version 0.14 to version 0.13"
     echo "    Delete switch_mac, ofc_id colum to 'ports'"
     echo "ALTER TABLE ports
 	DROP COLUMN switch_mac,
@@ -590,7 +588,7 @@ function downgrade_from_14(){
 }
 
 function upgrade_to_15(){
-    echo "    upgrade database from version 0.14 to version 0.15"
+    # echo "    upgrade database from version 0.14 to version 0.15"
     echo "    Add ofc_id colum to 'of_flows'"
     echo "ALTER TABLE of_flows
 	ADD COLUMN ofc_id VARCHAR(36) NULL DEFAULT NULL AFTER net_id,
@@ -599,7 +597,7 @@ function upgrade_to_15(){
 }
 
 function downgrade_from_15(){
-    echo "    downgrade database from version 0.15 to version 0.14"
+    # echo "    downgrade database from version 0.15 to version 0.14"
     echo "    Delete ofc_id to 'of_flows'"
     echo "ALTER TABLE of_flows
 	DROP COLUMN ofc_id,
@@ -609,7 +607,7 @@ function downgrade_from_15(){
 
 
 function upgrade_to_16(){
-    echo "    upgrade database from version 0.15 to version 0.16"
+    # echo "    upgrade database from version 0.15 to version 0.16"
     echo "    Add last_error and status colum to 'ofcs'"
     echo "ALTER TABLE ofcs
 	ADD COLUMN last_error VARCHAR(255) NULL DEFAULT NULL AFTER password,
@@ -618,14 +616,14 @@ function upgrade_to_16(){
 }
 
 function downgrade_from_16(){
-    echo "    downgrade database from version 0.16 to version 0.15"
+    # echo "    downgrade database from version 0.16 to version 0.15"
     echo "    Delete last_error and status colum to 'ofcs'"
     echo "ALTER TABLE ofcs DROP COLUMN last_error, DROP COLUMN status;	" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '16';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 function upgrade_to_17(){
-    echo "    upgrade database from version 0.16 to version 0.17"
+    # echo "    upgrade database from version 0.16 to version 0.17"
     echo "    Add pci to the unique indexes switch_dpid_switch_port switch_dpid_switch_mac at of_port_mappings"
     echo "ALTER TABLE of_port_mappings DROP INDEX switch_dpid_switch_port, "\
           "ADD UNIQUE INDEX switch_dpid_switch_port (switch_dpid, switch_port, pci);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -637,7 +635,7 @@ function upgrade_to_17(){
 }
 
 function downgrade_from_17(){
-    echo "    downgrade database from version 0.17 to version 0.16"
+    # echo "    downgrade database from version 0.17 to version 0.16"
     echo "    Delete pci fromthe unique indexes switch_dpid_switch_port switch_dpid_switch_mac at of_port_mappings"
     echo "ALTER TABLE of_port_mappings DROP INDEX switch_dpid_switch_port, "\
          "ADD UNIQUE INDEX switch_dpid_switch_port (switch_dpid, switch_port);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -650,13 +648,13 @@ function downgrade_from_17(){
 
 #TODO ... put funtions here
 
-echo "db version = "${DATABASE_VER_NUM}
-[ $DATABASE_TARGET_VER_NUM -eq $DATABASE_VER_NUM ] && echo "    current database version $DATABASE_VER is ok"
+# echo "db version = "${DATABASE_VER_NUM}
+[ $DB_VERSION -eq $DATABASE_VER_NUM ] && echo "    current database version '$DATABASE_VER_NUM' is ok"
 #UPGRADE DATABASE step by step
-while [ $DATABASE_TARGET_VER_NUM -gt $DATABASE_VER_NUM ]
+while [ $DB_VERSION -gt $DATABASE_VER_NUM ]
 do
+    echo "    upgrade database from version '$DATABASE_VER_NUM' to '$((DATABASE_VER_NUM+1))'"
     DATABASE_VER_NUM=$((DATABASE_VER_NUM+1))
-
     upgrade_to_${DATABASE_VER_NUM}
     #FILE_="${DIRNAME}/upgrade_to_${DATABASE_VER_NUM}.sh"
     #[ ! -x "$FILE_" ] && echo "Error, can not find script '$FILE_' to upgrade" >&2 && exit -1
@@ -664,8 +662,9 @@ do
 done
 
 #DOWNGRADE DATABASE step by step
-while [ $DATABASE_TARGET_VER_NUM -lt $DATABASE_VER_NUM ]
+while [ $DB_VERSION -lt $DATABASE_VER_NUM ]
 do
+    echo "    downgrade database from version '$DATABASE_VER_NUM' to '$((DATABASE_VER_NUM-1))'"
     #FILE_="${DIRNAME}/downgrade_from_${DATABASE_VER_NUM}.sh"
     #[ ! -x "$FILE_" ] && echo "Error, can not find script '$FILE_' to downgrade" >&2 && exit -1
     #$FILE_ || exit -1  # if fail return

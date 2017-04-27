@@ -22,7 +22,7 @@
 ##
 
 LICENSE_HEAD='/**
-* Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
+* Copyright 2017 Telefónica Investigación y Desarrollo, S.A.U.
 * This file is part of openvim
 * All Rights Reserved.
 *
@@ -54,7 +54,7 @@ DBNAME="vim_db"
 MYSQL=$(which mysql)
 AWK=$(which awk)
 GREP=$(which grep)
-DIRNAME=`dirname $0`
+DIRNAME=`dirname $(readlink -f $0)`
  
 function usage(){
     echo -e "Usage: $0 OPTIONS"

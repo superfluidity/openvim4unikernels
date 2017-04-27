@@ -31,6 +31,7 @@ import threading
 import vim_db
 import logging
 # import imp
+import os.path
 import argparse
 from netaddr import IPNetwork
 from jsonschema import validate as js_v, exceptions as js_e
@@ -41,9 +42,9 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.11-r527"
-version_date = "Apr 2017"
-database_version = "0.17"      #expected database schema version
+__version__ = "0.5.12-r528"
+version_date = "May 2017"
+database_version = 17      #needed database schema version
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -171,12 +172,20 @@ class ovim():
         # if self.running_info:
         #    return  #TODO service can be checked and rebuild broken threads
         r = self.db.get_db_version()
+        db_path = __file__
+        db_path = db_path[:db_path.rfind("/")]
+        if os.path.exists(db_path + "/database_utils/migrate_vim_db.sh"):
+            db_path += "/database_utils"
+        else:
+            db_path += "/../database_utils"
+
         if r[0] < 0:
-            raise ovimException("DATABASE is not a VIM one or it is a '0.0' version. Try to upgrade to version '{}' with "\
-                                "'./database_utils/migrate_vim_db.sh'".format(database_version) )
-        elif r[1] != database_version:
-            raise ovimException("DATABASE wrong version '{}'. Try to upgrade/downgrade to version '{}' with "\
-                                "'./database_utils/migrate_vim_db.sh'".format(r[1], database_version) )
+            raise ovimException("DATABASE is not valid. If you think it is corrupted, you can init it with"
+                                " '{db_path}/init_vim_db.sh' script".format(db_path=db_path))
+        elif r[0] != database_version:
+            raise ovimException("DATABASE wrong version '{current}'. Try to upgrade/downgrade to version '{target}'"
+                                " with '{db_path}/migrate_vim_db.sh {target}'".format(
+                                current=r[0], target=database_version,  db_path=db_path))
         self.logger.critical("Starting ovim server version: '{} {}' database version '{}'".format(
             self.get_version(), self.get_version_date(), self.get_database_version()))
         # create database connection for openflow threads
