@@ -28,6 +28,7 @@ DBHOST=""
 DBPORT="3306"
 DBNAME="vim_db"
 QUIET_MODE=""
+CREATEDB=""
 
 # Detect paths
 MYSQL=$(which mysql)
@@ -47,6 +48,7 @@ function usage(){
     echo -e "     -h HOST  database host. 'localhost' by default"
     echo -e "     -d NAME  database name. '$DBNAME' by default.  Prompts if DB access fails"
     echo -e "     -q --quiet: Do not prompt for credentials and exit if cannot access to database"
+    echo -e "     --createdb   forces the deletion and creation of the database"
     echo -e "     --help   shows this help"
 }
 
@@ -73,6 +75,7 @@ while getopts ":u:p:P:h:d:q-:" o; do
         -)
             [ "${OPTARG}" == "help" ] && usage && exit 0
             [ "${OPTARG}" == "quiet" ] && export QUIET_MODE="-q" && continue
+            [ "${OPTARG}" == "createdb" ] && export CREATEDB=yes && continue
             echo "Invalid option: '--$OPTARG'. Type --help for more information" >&2
             exit 1
             ;;
@@ -101,11 +104,34 @@ if [ -n "$DB_VERSION" ] ; then
 fi
 
 # Creating temporary file
-TEMPFILE="$(mktemp -q --tmpdir "initmanodb.XXXXXX")"
+TEMPFILE="$(mktemp -q --tmpdir "initdb.XXXXXX")"
 trap 'rm -f "$TEMPFILE"' EXIT
 chmod 0600 "$TEMPFILE"
 DEF_EXTRA_FILE_PARAM="--defaults-extra-file=$TEMPFILE"
 echo -e "[client]\n user='${DBUSER}'\n password='$DBPASS'\n host='$DBHOST'\n port='$DBPORT'" > "$TEMPFILE"
+
+if [ -n "${CREATEDB}" ] ; then
+    FIRST_TRY="yes"
+    while ! DB_ERROR=`mysqladmin "$DEF_EXTRA_FILE_PARAM" -s status 2>&1 >/dev/null` ; do
+        # if password is not provided, try silently with $DEFAULT_DBPASS before exit or prompt for credentials
+        [[ -n "$FIRST_TRY" ]] && [[ -z "$DBPASS" ]] && DBPASS="$DEFAULT_DBPASS" &&
+            echo -e "[client]\n user='${DBUSER}'\n password='$DBPASS'\n host='$DBHOST'\n port='$DBPORT'" > "$TEMPFILE" &&
+            continue
+        echo "$DB_ERROR"
+        [[ -n "$QUIET_MODE" ]] && echo -e "Invalid admin database credentials!!!" >&2 && exit 1
+        echo -e "Provide database credentials (Ctrl+c to abort):"
+        read -e -p "    mysql user($DBUSER): " KK
+        [ -n "$KK" ] && DBUSER="$KK"
+        read -e -s -p "    mysql password: " DBPASS
+        echo -e "[client]\n user='${DBUSER}'\n password='$DBPASS'\n host='$DBHOST'\n port='$DBPORT'" > "$TEMPFILE"
+        FIRST_TRY=""
+        echo
+    done
+    # echo "    deleting previous database ${DBNAME} if it exists"
+    mysqladmin $DEF_EXTRA_FILE_PARAM DROP "${DBNAME}" ${QUIET_MODE/q/f} && echo "Previous database deleted"
+    echo "    creating database ${DBNAME}"
+    mysqladmin $DEF_EXTRA_FILE_PARAM create "${DBNAME}" || exit 1
+fi
 
 # Check and ask for database user password
 FIRST_TRY="yes"
