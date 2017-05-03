@@ -33,7 +33,7 @@ DBPORT="3306"
 DBNAME="vim_db"
 QUIET_MODE=""
 #TODO update it with the last database version
-LAST_DB_VERSION=17
+LAST_DB_VERSION=18
 
 # Detect paths
 MYSQL=$(which mysql)
@@ -185,6 +185,7 @@ fi
 #[ $OPENVIM_VER_NUM -ge 5008 ] && DATABASE_TARGET_VER_NUM=15  #0.5.8   => 15
 #[ $OPENVIM_VER_NUM -ge 5009 ] && DATABASE_TARGET_VER_NUM=16  #0.5.9   => 16
 #[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
+#[ $OPENVIM_VER_NUM -ge 5013 ] && DATABASE_TARGET_VER_NUM=18  #0.5.13  => 18
 #TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -644,6 +645,29 @@ function downgrade_from_17(){
     echo "    Remove nets_with_same_vlan from table ofcs"
     echo "ALTER TABLE ofcs DROP COLUMN nets_with_same_vlan;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '17';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function upgrade_to_18(){
+    echo "    Add 'region' at 'nets' and change unique index vlan+region"
+    echo "ALTER TABLE nets ADD COLUMN region VARCHAR(64) NULL DEFAULT NULL AFTER admin_state_up, " \
+            "DROP INDEX type_vlan;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "    Fill 'region' with __OVS__/__DATA__ for OVS/openflow provider at nets"
+    echo "UPDATE nets set region='__OVS__' where provider like 'OVS%';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "UPDATE nets set region='__DATA__' where type='data' or type='ptp';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "    Create new index region_vlan at nets"
+	echo "ALTER TABLE nets ADD UNIQUE INDEX region_vlan (region, vlan);" \
+	     | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) "\
+            "VALUES (18, '0.18', '0.5.13', 'Add region to nets, change vlan unique index', '2017-05-03');"\
+         | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_18(){
+    echo "    Delete 'region' at 'nets' and change back unique index vlan+type"
+    echo "ALTER TABLE nets DROP INDEX region_vlan, DROP COLUMN region;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "    Create back index type_vlan at nets"
+	echo "ALTER TABLE nets ADD UNIQUE INDEX type_vlan (type, vlan);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '18';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 #TODO ... put funtions here

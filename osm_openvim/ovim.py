@@ -42,9 +42,9 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.12-r528"
+__version__ = "0.5.13-r529"
 version_date = "May 2017"
-database_version = 17      #needed database schema version
+database_version = 18      #needed database schema version
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -507,6 +507,7 @@ class ovim():
         net_vlan = network.get("vlan")
         net_bind_net = network.get("bind_net")
         net_bind_type = network.get("bind_type")
+        net_region = network.get("region")
         name = network["name"]
 
         # check if network name ends with :<vlan_tag> and network exist in order to make and automated bindning
@@ -602,8 +603,13 @@ class ovim():
                 net_vlan = bridge_net[1]
         elif net_type == 'bridge_data' or net_type == 'bridge_man' and self.config['network_type'] == 'ovs':
             net_provider = 'OVS'
+        if not net_region:
+            if net_type == "data" or net_type == "ptp":
+                net_region = "__DATA__"
+            elif net_provider == "OVS":
+                net_region = "__OVS__"
         if not net_vlan and (net_type == "data" or net_type == "ptp" or net_provider == "OVS"):
-            net_vlan = self.db.get_free_net_vlan()
+            net_vlan = self.db.get_free_net_vlan(net_region)
             if net_vlan < 0:
                 raise ovimException("Error getting an available vlan", HTTP_Internal_Server_Error)
         if net_provider == 'OVS':
@@ -612,6 +618,7 @@ class ovim():
         network['provider'] = net_provider
         network['type'] = net_type
         network['vlan'] = net_vlan
+        network['region'] = net_region
         dhcp_integrity = True
         if 'enable_dhcp' in network and network['enable_dhcp']:
             dhcp_integrity = self._check_dhcp_data_integrity(network)

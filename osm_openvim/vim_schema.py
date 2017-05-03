@@ -583,27 +583,28 @@ server_action_schema = {
 }
 
 network_new_schema = {
-    "title":"network creation information schema",
+    "title": "network creation information schema",
     "$schema": "http://json-schema.org/draft-04/schema#",
-    "type":"object",
-    "properties":{
-        "network":{
-            "type":"object",
+    "type": "object",
+    "properties": {
+        "network": {
+            "type": "object",
             "properties":{
-                "id":id_schema,
-                "name":name_schema,
-                "type":{"type":"string", "enum":["bridge_man","bridge_data","data", "ptp"]},
-                "shared":{"type":"boolean"},
-                "tenant_id":id_schema,
-                "admin_state_up":{"type":"boolean"},
-                "provider:vlan":vlan_schema,
-                "provider:physical":net_bind_schema,
-                "cidr":cidr_schema,
-                "enable_dhcp": {"type":"boolean"},
+                "id": id_schema,
+                "name": name_schema,
+                "type": {"type":"string", "enum": ["bridge_man", "bridge_data", "data", "ptp"]},
+                "shared": {"type": "boolean"},
+                "tenant_id": id_schema,
+                "admin_state_up": {"type": "boolean"},
+                "provider:vlan": vlan_schema,
+                "provider:physical": net_bind_schema,
+                "region": nameshort_schema,
+                "cidr": cidr_schema,
+                "enable_dhcp": {"type": "boolean"},
                 "dhcp_first_ip": ip_schema,
                 "dhcp_last_ip": ip_schema,
-                "bind_net":name_schema, #can be name, or uuid
-                "bind_type":{"oneOf":[{"type":"null"},{"type":"string", "pattern":"^vlan:[0-9]{1,4}$"}]}
+                "bind_net": name_schema,   # can be name, or uuid
+                "bind_type": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^vlan:[0-9]{1,4}$"}]}
             },
             "required": ["name"]
         }
