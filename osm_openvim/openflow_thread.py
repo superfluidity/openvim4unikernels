@@ -93,18 +93,22 @@ class openflow_thread(threading.Thread):
     """
     This thread interacts with a openflow controller to create dataplane connections
     """
-    def __init__(self, of_uuid, of_connector, db, db_lock, of_test, pmp_with_same_vlan=False, debug='ERROR'):
+    def __init__(self, of_uuid, of_connector, db, db_lock, of_test, pmp_with_same_vlan=False, logger_name=None,
+                 debug=None):
         threading.Thread.__init__(self)
         self.of_uuid = of_uuid
         self.db = db
         self.pmp_with_same_vlan = pmp_with_same_vlan
-        self.name = "openflow"
         self.test = of_test
         self.db_lock = db_lock
         self.OF_connector = of_connector
-        self.logger = logging.getLogger('vim.OF-' + of_uuid)
-        self.logger.setLevel(getattr(logging, debug))
-        self.logger.name = of_connector.name + " " + self.OF_connector.dpid
+        if logger_name:
+            self.logger_name = logger_name
+        else:
+            self.logger_name = "openvim.ofc." + of_uuid
+        self.logger = logging.getLogger(self.logger_name)
+        if debug:
+            self.logger.setLevel(getattr(logging, debug))
         self.queueLock = threading.Lock()
         self.taskQueue = Queue.Queue(2000)
         
@@ -115,7 +119,7 @@ class openflow_thread(threading.Thread):
             self.queueLock.release()
             return 1, None
         except Queue.Full:
-            return -1, "timeout inserting a task over openflow thread " + self.name
+            return -1, "timeout inserting a task over openflow thread " + self.of_uuid
 
     def run(self):
         self.logger.debug("Start openflow thread")

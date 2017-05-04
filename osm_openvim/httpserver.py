@@ -1831,7 +1831,9 @@ def http_server_action(server_id, tenant_id, action):
             delete_dhcp_ovs_bridge(vlan, net_id)
             delete_mac_dhcp(vm_ip, vlan, mac)
             config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, net_id)
-    return format_out(data + warn_text)
+    if warn_text:
+        data["result"] += warn_text
+    return format_out(data)
 
 
 

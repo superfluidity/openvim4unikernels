@@ -100,8 +100,6 @@ class ovim():
         self.logger = logging.getLogger(self.logger_name)
         self.db = None
         self.db = self._create_database_connection()
-        self.db_lock = None
-        self.db_of = None
         self.of_test_mode = False
 
     def _create_database_connection(self):
@@ -189,10 +187,8 @@ class ovim():
         self.logger.critical("Starting ovim server version: '{} {}' database version '{}'".format(
             self.get_version(), self.get_version_date(), self.get_database_version()))
         # create database connection for openflow threads
-        self.db_of = self._create_database_connection()
-        self.config["db"] = self.db_of
-        self.db_lock = threading.Lock()
-        self.config["db_lock"] = self.db_lock
+        self.config["db"] = self._create_database_connection()
+        self.config["db_lock"] = threading.Lock()
 
         self.of_test_mode = False if self.config['mode'] == 'normal' or self.config['mode'] == "OF only" else True
         # precreate interfaces; [bridge:<host_bridge_name>, VLAN used at Host, uuid of network camping in this bridge,
@@ -236,7 +232,8 @@ class ovim():
         dhcp_params = self.config.get("dhcp_server")
         if dhcp_params:
             thread = dt.dhcp_thread(dhcp_params=dhcp_params, test=host_test_mode, dhcp_nets=self.config["dhcp_nets"],
-                                    db=self.db_of, db_lock=self.db_lock, logger_name=self.logger_name + ".dhcp",
+                                    db=self.config["db"], db_lock=self.config["db_lock"],
+                                    logger_name=self.logger_name + ".dhcp",
                                     debug=self.config.get('log_level_of'))
             thread.start()
             self.config['dhcp_thread'] = thread
@@ -254,9 +251,11 @@ class ovim():
         self.config['host_threads'] = {}
         for host in hosts:
             host['image_path'] = '/opt/VNF/images/openvim'
-            thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=self.db_of,
-                                    db_lock=self.db_lock, test=host_test_mode, image_path=self.config['image_path'],
-                                    version=self.config['version'], host_id=host['uuid'], develop_mode=host_develop_mode,
+            thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=self.config["db"],
+                                    db_lock=self.config["db_lock"], test=host_test_mode,
+                                    image_path=self.config['image_path'],
+                                    version=self.config['version'], host_id=host['uuid'],
+                                    develop_mode=host_develop_mode,
                                     develop_bridge_iface=host_develop_bridge_iface,
                                     logger_name=self.logger_name + ".host." + host['name'],
                                     debug=self.config.get('log_level_host'))
@@ -417,8 +416,11 @@ class ovim():
         #    ofc_net_same_vlan = False
         ofc_net_same_vlan = False
 
-        thread = oft.openflow_thread(ofc_uuid, of_conn, of_test=self.of_test_mode, db=self.db_of, db_lock=self.db_lock,
-                                     pmp_with_same_vlan=ofc_net_same_vlan, debug=self.config['log_level_of'])
+        thread = oft.openflow_thread(ofc_uuid, of_conn, of_test=self.of_test_mode, db=self.config["db"],
+                                     db_lock=self.config["db_lock"],
+                                     pmp_with_same_vlan=ofc_net_same_vlan,
+                                     logger_name=self.logger_name + ".ofc." + ofc_uuid,
+                                     debug=self.config.get('log_level_of'))
         #r, c = thread.OF_connector.obtain_port_correspondence()
         #if r < 0:
         #    raise ovimException("Cannot get openflow information %s", c)
@@ -1357,13 +1359,13 @@ class ovim():
         host_develop_mode = True if self.config['mode'] == 'development' else False
 
         dhcp_host = ht.host_thread(name='openvim_controller', user=ovs_controller_user, host=controller_ip,
-                                   db=self.db_of,
-                                   db_lock=self.db_lock, test=host_test_mode,
+                                   db=self.config["db"], db_lock=self.config["db_lock"], test=host_test_mode,
                                    image_path=self.config['image_path'], version=self.config['version'],
                                    host_id='openvim_controller', develop_mode=host_develop_mode,
-                                   develop_bridge_iface=bridge_ifaces, logger_name=self.logger_name + ".host.controller",
+                                   develop_bridge_iface=bridge_ifaces,
+                                   logger_name=self.logger_name + ".host.controller",
                                    debug=self.config.get('log_level_host'))
-
+        dhcp_host.start()
         self.config['host_threads']['openvim_controller'] = dhcp_host
         if not host_test_mode:
             dhcp_host.ssh_connect()

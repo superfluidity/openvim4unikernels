@@ -318,12 +318,12 @@ class host_thread(threading.Thread):
                         continue
 
                     if task[0] == 'instance':
-                        self.logger.debug("processing task instance " + task[1]['action'])
-                        retry=0
-                        while retry <2:
+                        self.logger.debug("processing task instance " + str(task[1]['action']))
+                        retry = 0
+                        while retry < 2:
                             retry += 1
-                            r=self.action_on_server(task[1], retry==2)
-                            if r>=0:
+                            r = self.action_on_server(task[1], retry==2)
+                            if r >= 0:
                                 break
                     elif task[0] == 'image':
                         pass
