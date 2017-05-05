@@ -58,7 +58,8 @@ function is_valid_uuid(){
 
 
 #process options
-source ${DIRNAME}/get-options.sh "force:f delete:d delete-all port:p= admin-port:P= screen-name= help:h dbname= insert-bashrc" $* || $_exit 1
+source ${DIRNAME}/get-options.sh \
+    "force:f delete:d delete-all port:p= admin-port:P= screen-name= help:h dbname= insert-bashrc" $* || $_exit 1
 
 #check correct arguments
 action_list=""
