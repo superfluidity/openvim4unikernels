@@ -26,7 +26,7 @@ image:
     path:         /image-path/at/the/compute-node/storage/image 
     metadata:     # Optional extra metadata of the image. All fields are optional
         use_incremental: "yes"          # "yes" by default, "no" Deployed using a incremental qcow2 image
-        vpci:            "0000:10:00.0" #requiered PCI at guess
+        vpci:            "0000:00:10.0" #requiered PCI at guess
         os_distro:       win            # operating system distribution
         os_type:         windows        # operating system type "linux" by default, "windows"
         os_version:      "7"            # operating system version

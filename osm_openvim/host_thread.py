@@ -355,7 +355,7 @@ class host_thread(threading.Thread):
                         self.logger.debug("Deleting vxlan {} tunnel".format(task[1]))
                         self.delete_ovs_vxlan_tunnel(task[1])
                     elif task[0] == 'create-ovs-bridge-port':
-                        self.logger.debug("Adding port ovim-{} to OVS bridge".fromat(task[1]))
+                        self.logger.debug("Adding port ovim-{} to OVS bridge".format(task[1]))
                         self.create_ovs_bridge_port(task[1])
                     elif task[0] == 'del-ovs-port':
                         self.logger.debug("Delete bridge attached to ovs port vlan {} net {}".format(task[1], task[2]))

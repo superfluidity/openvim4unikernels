@@ -1645,7 +1645,7 @@ def http_post_server_id(tenant_id):
                         dhcp_firt_ip = str(server_net['network']['dhcp_first_ip'])
                         dhcp_last_ip = str(server_net['network']['dhcp_last_ip'])
                         dhcp_cidr = str(server_net['network']['cidr'])
-                        gateway = str(server_net['network']['gateway'])
+                        gateway = str(server_net['network']['gateway_ip'])
                         vm_dhcp_ip = c2[0]["ip_address"]
                         config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
 
