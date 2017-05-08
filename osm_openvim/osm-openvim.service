@@ -2,8 +2,7 @@
 Description=openvim server
 
 [Service]
-User=${USER_OWNER}
-ExecStart=openvimd -c /etc/osm/openvimd.cfg --log-file=/var/log/osm/openvim.log
+ExecStart=/usr/bin/openvimd -c /etc/osm/openvimd.cfg --log-file=/var/log/osm/openvim.log
 Restart=always
 
 [Install]

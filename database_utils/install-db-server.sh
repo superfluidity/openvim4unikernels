@@ -156,8 +156,8 @@ echo '
 function db_exists(){  # (db_name, credential_file)
     # check credentials
     mysqlshow --defaults-extra-file="$2" >/dev/null  || exit 1
-    RESULT=`mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -w $1`
-    if [ "$RESULT" == "$1" ]; then
+    if mysqlshow --defaults-extra-file="$2" | grep -v Wildcard | grep -w -q $1
+    then
         # echo " DB $1 exists"
         return 0
     fi
@@ -231,6 +231,12 @@ fi
 # if not assuming ubuntu type
 [ -f /etc/redhat-release ] || _DISTRO=$(lsb_release -is  2>/dev/null)
 
+if [[ -z "$NO_PACKAGES" ]]
+then
+    [ "$USER" != "root" ] && echo "Needed root privileges" >&2 && exit 1
+    _install_mysql_package || exit 1
+fi
+
 # Creating temporary file for MYSQL installation and initialization"
 TEMPFILE="$(mktemp -q --tmpdir "installdb.XXXXXX")"
 trap 'rm -f "$TEMPFILE"' EXIT
@@ -260,12 +266,6 @@ if [[ ! -z "$UNINSTALL" ]]
 then
     _uninstall_db
     exit
-fi
-
-if [[ -z "$NO_PACKAGES" ]]
-then
-    [ "$USER" != "root" ] && echo "Needed root privileges" >&2 && exit 1
-    _install_mysql_package || exit 1
 fi
 
 # Create or update database

@@ -78,8 +78,10 @@ done
 [[ -n "$option_help" ]] && usage   && $_exit 0
 
 #check numeric values for port
-[[ -n "$option_port" ]] && ( [[ "$option_port" -lt 1 ]] || [[ "$option_port" -gt 65535 ]] ) && echo "Option '-p' or '--port' requires a valid numeric argument" >&2  && $_exit 1
-[[ -n "$option_admin_port" ]]  && ( [[ "$option_admin_port" -lt 1 ]] || [[ "$option_admin_port" -gt 65535 ]] ) && echo "Option '-P' or '--admin-port' requieres a valid numeric argument"  >&2 && $_exit 1
+[[ -n "$option_port" ]] && ( [[ "$option_port" -lt 1 ]] || [[ "$option_port" -gt 65535 ]] ) &&
+    echo "Option '-p' or '--port' requires a valid numeric argument" >&2  && $_exit 1
+[[ -n "$option_admin_port" ]]  && ( [[ "$option_admin_port" -lt 1 ]] || [[ "$option_admin_port" -gt 65535 ]] ) &&
+    echo "Option '-P' or '--admin-port' requieres a valid numeric argument"  >&2 && $_exit 1
 
 [[ -n "$option_screen_name" ]] && screen_name="$option_screen_name" && screen_name_param=" --screen-name $screen_name"
 [[ -z "$option_screen_name" ]] && screen_name=vim                   && screen_name_param="" #default value
@@ -125,7 +127,8 @@ then
 
 elif [[ $action == delete-all ]] 
 then
-    for t in `${DIRvim}/openvim tenant-list | awk '/^ *[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12} +/{printf("%s:%s",$1,$2)}'`
+    for t in `${DIRvim}/openvim tenant-list |
+        awk '/^ *[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12} +/{printf("%s:%s",$1,$2)}'`
     do
         t_id=${t%%:*}
         t_name=${t#*:}
@@ -166,14 +169,16 @@ then
     done
 elif [[ $action == "delete" ]]
 then
-    ${DIRvim}/openvim net-delete -f default           || echo "fail"
-    ${DIRvim}/openvim net-delete -f macvtap:em1       || echo "fail"
-    ${DIRvim}/openvim net-delete -f shared_bridge_net || echo "fail"
-    ${DIRvim}/openvim net-delete -f data_net          || echo "fail"
+    ${DIRvim}/openvim net-delete -f mgmt              || echo "fail"
+    # ${DIRvim}/openvim net-delete -f default           || echo "fail"
+    # ${DIRvim}/openvim net-delete -f macvtap:em1       || echo "fail"
+    # ${DIRvim}/openvim net-delete -f shared_bridge_net || echo "fail"
+    # ${DIRvim}/openvim net-delete -f data_net          || echo "fail"
     ${DIRvim}/openvim host-remove -f fake-host-0      || echo "fail"
     ${DIRvim}/openvim host-remove -f fake-host-1      || echo "fail"
     ${DIRvim}/openvim host-remove -f fake-host-2      || echo "fail"
     ${DIRvim}/openvim host-remove -f fake-host-3      || echo "fail"
+    ${DIRvim}/openvim image-delete -f cirros034       || echo "fail"
     result=`openvim tenant-list osm`
     vimtenant=`echo $result |gawk '{print $1}'`
     #check a valid uuid is obtained
@@ -190,19 +195,29 @@ then
     ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example2.yaml || ! echo "fail" >&2 || $_exit 1
     ${DIRvim}/openvim host-add $DIRvim/test/hosts/host-example3.yaml || ! echo "fail" >&2 || $_exit 1
     echo "Adding example nets"
-    ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example0.yaml || ! echo "fail" >&2 || $_exit 1
-    ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example1.yaml || ! echo "fail" >&2 || $_exit 1
-    ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example2.yaml || ! echo "fail" >&2 || $_exit 1
-    ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example3.yaml || ! echo "fail" >&2 || $_exit 1
+    # ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example0.yaml || ! echo "fail" >&2 || $_exit 1
+    # ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example1.yaml || ! echo "fail" >&2 || $_exit 1
+    # ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example2.yaml || ! echo "fail" >&2 || $_exit 1
+    # ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example3.yaml || ! echo "fail" >&2 || $_exit 1
+    ${DIRvim}/openvim net-create $DIRvim/test/networks/net-example4.yaml || ! echo "fail" >&2 || $_exit 1
 
     printf "%-50s" "Creating openvim tenant 'osm': "
-    result=`openvim tenant-create '{tenant: {name: osm, description: admin}}'`
+    result=`${DIRvim}/openvim tenant-create '{tenant: {name: osm, description: admin}}'`
     vimtenant=`echo $result |gawk '{print $1}'`
     #check a valid uuid is obtained
     ! is_valid_uuid $vimtenant && echo "FAIL" && echo "    $result" && $_exit 1
     echo "  $vimtenant"
     export OPENVIM_TENANT=$vimtenant
     [[ -n "$option_insert_bashrc" ]] && echo -e "\nexport OPENVIM_TENANT=$vimtenant" >> ~/.bashrc
+
+    printf "%-50s" "Adding example image 'cirros034': "
+    result=`${DIRvim}/openvim image-create --name cirros034 \
+        --path http://download.cirros-cloud.net/0.3.4/cirros-0.3.4-x86_64-disk.img \
+        --description "cirros from web"`
+    image=`echo $result |gawk '{print $1}'`
+    ! is_valid_uuid $image && echo "FAIL" && echo "    $result" && $_exit 1
+    echo "  $image"
+
 
     echo
     #echo "Check virtual machines are deployed"

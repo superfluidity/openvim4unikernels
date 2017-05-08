@@ -36,16 +36,21 @@ function usage(){
 }
 
 function uninstall(){
-    echo "systemctl disable openvim.service " &&  systemctl disable openvim.service 2>/dev/null || echo "  Already done"
-    echo "service openvim stop " && service openvim stop 2>/dev/null || echo "  Already done"
-    for file in /opt/openvim /etc/default/openvimd.cfg /var/log/openvim /etc/systemd/system/openvim.service /usr/bin/openvim /usr/bin/initopenvim /usr/sbin/service-openvim /usr/bin/openvim-report /usr/bin/openflow
+    echo "systemctl disable openvim.service " &&  systemctl disable openvim.service 2>/dev/null ||
+        echo "  Already done"
+    echo "systemctl disable osm-openvim.service " &&  systemctl disable osm-openvim.service 2>/dev/null ||
+        echo "  Already done"
+    echo "service osm-openvim stop " && service osm-openvim stop 2>/dev/null || echo "  Already done"
+    for file in /opt/openvim /etc/default/openvimd.cfg /etc/osm/openvimd.cfg /var/log/openvim /var/log/osm/openvim* \
+        /etc/systemd/system/openvim.service /etc/systemd/system/osm-openvim.service /usr/bin/openvim /usr/sbin/service-openvim \
+        /usr/bin/openvim-report /usr/bin/initopenvim /usr/bin/openflow 
     do
+        echo rm $file
         rm -rf $file || ! echo "Can not delete '$file'. Needed root privileges?" >&2 || exit 1
     done
     echo "Done"
 }
 
-BAD_PATH_ERROR="Path '$FILE' does not contain a valid openvim distribution"
 GIT_URL=https://osm.etsi.org/gerrit/osm/openvim.git
 USER_OWNER="root"
 QUIET_MODE=""
@@ -115,50 +120,50 @@ else
 fi
 
 
-if [[ -z $FILE ]]
+if [[ -z "$FILE" ]]
 then
     FILE=__temp__${RANDOM}
     git clone $GIT_URL $FILE || ! echo "Cannot get openvim source code from $GIT_URL" >&2 || exit 1
     DELETE=y
-    #git checkout <tag version>
 else
     [[ -d  "$FILE" ]] || ! echo $BAD_PATH_ERROR >&2 || exit 1
 fi
 
-#make idenpotent
+#make idempotent
 uninstall
 #copy files
 cp -r "$FILE" /opt/openvim         || ! echo $BAD_PATH_ERROR >&2 || exit 1
-mkdir -p /opt/openvim/logs
+mkdir -p /etc/osm  || echo "warning cannot create config folder '/etc/osm'"
+cp /opt/openvim/osm_openvim/openvimd.cfg /etc/osm/openvimd.cfg  ||
+    echo "warning cannot create file '/etc/osm/openvimd.cfg'"
+mkdir -p /var/log/osm  || echo "warning cannot create log folder '/var/log/osm'"
 #makes links
-ln -s -v /opt/openvim/openvimd.cfg /etc/default/openvimd.cfg  || echo "warning cannot create link '/etc/default/openvimd.cfg'"
-ln -s -v /opt/openvim/logs /var/log/openvim  || echo "warning cannot create link '/var/log/openvim'"
 ln -s -v /opt/openvim/openvim /usr/bin/openvim
 ln -s -v /opt/openvim/scripts/service-openvim /usr/sbin/service-openvim
 ln -s -v /opt/openvim/scripts/openvim-report /usr/bin/openvim-report
-ln -s -v /opt/openvim/scripts/initopenvim.sh /usr/bin/initopenvim
+ln -s -v /opt/openvim/scripts/initopenvim /usr/bin/initopenvim
 ln -s -v /opt/openvim/openflow /usr/bin/openflow
 
 chown -R $SUDO_USER /opt/openvim
 
 mkdir -p /etc/systemd/system/
-cat  > /etc/systemd/system/openvim.service  << EOF 
+cat  > /etc/systemd/system/osm-openvim.service  << EOF 
 [Unit]
 Description=openvim server
 
 [Service]
 User=${USER_OWNER}
-ExecStart=/opt/openvim/openvimd -c /opt/openvim/osm_openvim/openvimd.cfg --log-file=/opt/openvim/logs/openvim.log
+ExecStart=/opt/openvim/openvimd -c /etc/osm/openvimd.cfg --log-file=/var/log/osm/openvim.log
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-[[ -n $DELETE ]] && rm -rf $FILE
+[[ -n $DELETE ]] && rm -rf "${FILE}"
 
-service openvim start
-systemctl enable openvim.service
+service osm-openvim start
+systemctl enable osm-openvim.service
 
 echo Done
 exit
