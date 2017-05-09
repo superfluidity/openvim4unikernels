@@ -628,7 +628,7 @@ class host_thread(threading.Thread):
             elif content[0]['provider'][0:3] == "OVS":
                 vlan = content[0]['provider'].replace('OVS:', '')
                 text += self.tab() + "<interface type='bridge'>" + \
-                        self.inc_tab() + "<source bridge='ovim-" + vlan + "'/>"
+                        self.inc_tab() + "<source bridge='ovim-" + str(vlan) + "'/>"
             else:
                 return -1, 'Unknown Bridge net provider ' + content[0]['provider']
             if model!=None:
@@ -751,7 +751,7 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + vlan
+            port_name = 'ovim-' + str(vlan)
             command = 'sudo ovs-vsctl del-port br-int ' + port_name
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -779,7 +779,7 @@ class host_thread(threading.Thread):
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
         try:
-            net_namespace = 'ovim-' + vlan
+            net_namespace = 'ovim-' + str(vlan)
             dhcp_path = os.path.join(dhcp_path, net_namespace)
             pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
@@ -852,8 +852,8 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + vlan
-            command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + vlan
+            port_name = 'ovim-' + str(vlan)
+            command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + str(vlan)
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -909,8 +909,8 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + vlan
-            command = 'sudo ip link set dev veth0-' + vlan + ' down'
+            port_name = 'ovim-' + str(vlan)
+            command = 'sudo ip link set dev veth0-' + str(vlan) + ' down'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             # content = stdout.read()
@@ -952,7 +952,7 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + vlan
+            port_name = 'ovim-' + str(vlan)
             command = 'sudo brctl show | grep ' + port_name
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -1010,7 +1010,7 @@ class host_thread(threading.Thread):
         if self.test:
             return True
 
-        net_namespace = 'ovim-' + vlan
+        net_namespace = 'ovim-' + str(vlan)
         dhcp_path = os.path.join(dhcp_path, net_namespace)
         dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
 
@@ -1054,7 +1054,7 @@ class host_thread(threading.Thread):
         if self.test:
             return False
         try:
-            net_namespace = 'ovim-' + vlan
+            net_namespace = 'ovim-' + str(vlan)
             dhcp_path = os.path.join(dhcp_path, net_namespace)
             dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
 
@@ -1094,8 +1094,8 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            interface = 'tap-' + vlan
-            net_namespace = 'ovim-' + vlan
+            interface = 'tap-' + str(vlan)
+            net_namespace = 'ovim-' + str(vlan)
             dhcp_path = os.path.join(dhcp_path, net_namespace)
             leases_path = os.path.join(dhcp_path, "dnsmasq.leases")
             pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
@@ -1149,18 +1149,18 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            net_namespace = 'ovim-' + vlan
-            command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + vlan
+            net_namespace = 'ovim-' + str(vlan)
+            command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + str(vlan)
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' down'
+            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + str(vlan) + ' down'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link set dev ovs-tap-' + vlan + ' down'
+            command = 'sudo ip link set dev ovs-tap-' + str(vlan) + ' down'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1170,11 +1170,11 @@ class host_thread(threading.Thread):
                 self.ssh_connect()
             return False
 
-    def create_dhcp_interfaces(self, vlan, ip, netmask):
+    def create_dhcp_interfaces(self, vlan, ip_listen_address, netmask):
         """
         Create a linux bridge with STP active
         :param vlan: segmentation id
-        :param ip: Ip included in the dhcp range for the tap interface living in namesapce side
+        :param ip_listen_address: Listen Ip address for the dhcp service, the tap interface living in namesapce side
         :param netmask: dhcp net CIDR
         :return: True if success
         """
@@ -1182,41 +1182,41 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            net_namespace = 'ovim-' + vlan
-            namespace_interface = 'tap-' + vlan
+            net_namespace = 'ovim-' + str(vlan)
+            namespace_interface = 'tap-' + str(vlan)
 
             command = 'sudo ip netns add ' + net_namespace
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link add tap-' + vlan + ' type veth peer name ovs-tap-' + vlan
+            command = 'sudo ip link add tap-' + str(vlan) + ' type veth peer name ovs-tap-' + str(vlan)
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + vlan + ' tag=' + vlan
+            command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + str(vlan) + ' tag=' + str(vlan)
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link set tap-' + vlan + ' netns ' + net_namespace
+            command = 'sudo ip link set tap-' + str(vlan) + ' netns ' + net_namespace
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + vlan + ' up'
+            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + str(vlan) + ' up'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link set dev ovs-tap-' + vlan + ' up'
+            command = 'sudo ip link set dev ovs-tap-' + str(vlan) + ' up'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
             command = 'sudo  ip netns exec ' + net_namespace + ' ' + ' ifconfig  ' + namespace_interface \
-                      + ' ' + ip + ' netmask ' + netmask
+                      + ' ' + ip_listen_address + ' netmask ' + netmask
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()

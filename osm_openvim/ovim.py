@@ -142,11 +142,11 @@ class ovim():
 
             ips = IPNetwork(cidr)
             if "dhcp_first_ip" not in network:
-                network["dhcp_first_ip"] = str(ips[2])
+                network["dhcp_first_ip"] = str(ips[3])
             if "dhcp_last_ip" not in network:
                 network["dhcp_last_ip"] = str(ips[-2])
             if "gateway_ip" not in network:
-                network["gateway_ip"] = str(ips[1])
+                network["gateway_ip"] = str(ips[2])
 
             return True
         else:
@@ -1382,7 +1382,7 @@ class ovim():
 
         controller_host = self.get_dhcp_controller()
         controller_host.create_linux_bridge(vlan)
-        controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
+        controller_host.create_dhcp_interfaces(vlan, gateway, dhcp_netmask)
         controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path, gateway)
 
 if __name__ == "__main__":

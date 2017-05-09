@@ -375,10 +375,10 @@ if __name__=="__main__":
                 module = of_controller_module
             else:
                 module = of_controller_type
-            module_info = imp.find_module(module)
-            
-            of_conn = imp.load_module("of_conn", *module_info)
+
             try:
+                pkg = __import__("osm_openvim." + module)
+                of_conn = getattr(pkg, module)
                 ofconnector = of_conn.OF_conn(params)
             except Exception as e: 
                 print "Cannot open the Openflow controller '%s': %s" % (type(e).__name__, str(e))
