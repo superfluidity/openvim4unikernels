@@ -232,8 +232,8 @@ then
         "#################################################################\n"\
         "#####        INSTALL PYTHON PACKAGES                        #####\n"\
         "#################################################################"
-    [ "$_DISTRO" == "Ubuntu" ] && install_packages "python-yaml python-libvirt python-bottle python-mysqldb python-jsonschema python-paramiko python-argcomplete python-requests"
-    [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_packages "PyYAML libvirt-python MySQL-python python-jsonschema python-paramiko python-argcomplete python-requests"
+    [ "$_DISTRO" == "Ubuntu" ] && install_packages "python-yaml python-libvirt python-bottle python-mysqldb python-jsonschema python-paramiko python-argcomplete python-requests python-netaddr"
+    [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && install_packages "PyYAML libvirt-python MySQL-python python-jsonschema python-paramiko python-argcomplete python-requests python-netaddr"
     # The only way to install python-bottle on Centos7 is with easy_install or pip
     [ "$_DISTRO" == "CentOS" -o "$_DISTRO" == "Red" ] && easy_install -U bottle
 
@@ -292,8 +292,8 @@ then
 fi
 
 echo -e "\n"\
-    "#################################################################n"\
-    "#####        CONFIGURE OPENVIM CLIENT                       #####n"\
+    "#################################################################\n"\
+    "#####        CONFIGURE OPENVIM CLIENT                       #####\n"\
     "#################################################################"
 #creates a link at ~/bin if not configured as a service
 if [[ -z "$INSTALL_AS_A_SERVICE" ]]
@@ -344,8 +344,8 @@ fi
 
 if [ -z "$NO_DB" ]; then
     echo -e "\n"\
-        "#################################################################"\n"\
-        "#####               INSTALL DATABASE SERVER                 #####"\n"\
+        "#################################################################\n"\
+        "#####               INSTALL DATABASE SERVER                 #####\n"\
         "#################################################################"
 
     if [ -n "$QUIET_MODE" ]; then
@@ -357,8 +357,8 @@ fi   # [ -z "$NO_DB" ]
 if [[ -n "$INSTALL_AS_A_SERVICE"  ]]
 then
     echo -e "\n"\
-        "#################################################################"\n"\
-        "#####        CONFIGURE OPENVIM SERVICE                      #####"\n"\
+        "#################################################################\n"\
+        "#####        CONFIGURE OPENVIM SERVICE                      #####\n"\
         "#################################################################"
 
     ${BASEFOLDER}/scripts/install-openvim-service.sh -f ${BASEFOLDER} `[[ -z "$NOCLONE" ]] && echo "-d"`
