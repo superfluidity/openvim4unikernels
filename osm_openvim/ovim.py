@@ -42,7 +42,7 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.13-r529"
+__version__ = "0.5.14-r530"
 version_date = "May 2017"
 database_version = 18      #needed database schema version
 
@@ -564,7 +564,7 @@ class ovim():
                 bridge_net_name = net_provider[7:]
                 for brnet in self.config['bridge_nets']:
                     if brnet[0] == bridge_net_name:  # free
-                        if not brnet[3]:
+                        if brnet[3]:
                             raise ovimException("invalid 'provider:physical', "
                                                 "bridge '%s' is already used" % bridge_net_name, HTTP_Conflict)
                         bridge_net = brnet
@@ -627,7 +627,7 @@ class ovim():
                 if network["name"] in self.config["dhcp_server"].get("nets", ()):
                     self.config["dhcp_nets"].append(content)
                     self.logger.debug("dhcp_server: add new net", content)
-                elif not bridge_net and bridge_net[0] in self.config["dhcp_server"].get("bridge_ifaces", ()):
+                elif bridge_net and bridge_net[0] in self.config["dhcp_server"].get("bridge_ifaces", ()):
                     self.config["dhcp_nets"].append(content)
                     self.logger.debug("dhcp_server: add new net", content, content)
             return content
@@ -747,7 +747,7 @@ class ovim():
                 self.config["dhcp_nets"].remove(network_id)
             return content
         else:
-            raise ovimException("Error deleting  network %s" % network_id, HTTP_Internal_Server_Error)
+            raise ovimException("Error deleting network '{}': {}".format(network_id, content), -result)
 
     def get_openflow_rules(self, network_id=None):
         """
@@ -836,7 +836,7 @@ class ovim():
             else:
                 raise ovimException("Default Openflow controller not not running", HTTP_Not_Found)
 
-        if ofc_id in self.config['ofcs_thread']:
+        elif ofc_id in self.config['ofcs_thread']:
             conn = self.config['ofcs_thread'][ofc_id].OF_connector
         else:
             raise ovimException("Openflow controller not found with ofc_id={}".format(ofc_id), HTTP_Not_Found)
