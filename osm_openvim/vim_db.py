@@ -1126,7 +1126,7 @@ class vim_db():
 
                         #get dedicated ports and SRIOV
                         cmd = "SELECT port_id as iface_id, p.vlan as vlan, p.mac as mac_address, net_id, if(model='PF',\
-                            'yes',if(model='VF','no','yes:sriov')) as dedicated, rp.Mbps as bandwidth, name, vpci, \
+                            'yes',if(model='VF','no','yes:sriov')) as dedicated, p.Mbps as bandwidth, name, vpci, \
                             pci as source \
                             FROM resources_port as rp join ports as p on port_id=uuid  WHERE p.instance_id = '%s' AND numa_id = '%s' and p.type='instance:data'" % (instance_id, numa_id) 
                         self.logger.debug(cmd)
