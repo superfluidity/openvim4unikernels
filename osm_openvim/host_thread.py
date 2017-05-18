@@ -1901,7 +1901,8 @@ class host_thread(threading.Thread):
             #TODO.Revise  self.server_forceoff(True)
 
             iface = conn.interfaceLookupByMACString(mac)
-            iface.destroy()
+            if iface.isActive():
+                iface.destroy()
             iface.create()
             self.logger.debug("restore_iface '%s' %s", name, mac)
         except host_thread.lvirt_module.libvirtError as e:
