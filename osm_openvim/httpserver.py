@@ -1637,21 +1637,22 @@ def http_post_server_id(tenant_id):
                         print ':http_post_servers ERROR UPDATING dhcp_server !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c
 
                 #ensure compute contain the bridge for ovs networks:
-                server_net = get_network_id(iface['net_id'])
-                if server_net["network"].get('provider:physical', "")[:3] == 'OVS':
-                    vlan = str(server_net['network']['provider:vlan'])
-                    dhcp_enable = bool(server_net['network']['enable_dhcp'])
-                    if dhcp_enable:
-                        dhcp_firt_ip = str(server_net['network']['dhcp_first_ip'])
-                        dhcp_last_ip = str(server_net['network']['dhcp_last_ip'])
-                        dhcp_cidr = str(server_net['network']['cidr'])
-                        gateway = str(server_net['network']['gateway_ip'])
-                        vm_dhcp_ip = c2[0]["ip_address"]
-                        config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
+                if iface.get("net_id"):
+                    server_net = get_network_id(iface['net_id'])
+                    if server_net["network"].get('provider:physical', "")[:3] == 'OVS':
+                        vlan = str(server_net['network']['provider:vlan'])
+                        dhcp_enable = bool(server_net['network']['enable_dhcp'])
+                        if dhcp_enable:
+                            dhcp_firt_ip = str(server_net['network']['dhcp_first_ip'])
+                            dhcp_last_ip = str(server_net['network']['dhcp_last_ip'])
+                            dhcp_cidr = str(server_net['network']['cidr'])
+                            gateway = str(server_net['network']['gateway_ip'])
+                            vm_dhcp_ip = c2[0]["ip_address"]
+                            config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
 
-                        set_mac_dhcp(vm_dhcp_ip, vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, c2[0]['mac'])
-                        http_controller = config_dic['http_threads'][threading.current_thread().name]
-                        http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, gateway)
+                            set_mac_dhcp(vm_dhcp_ip, vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, c2[0]['mac'])
+                            http_controller = config_dic['http_threads'][threading.current_thread().name]
+                            http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, gateway)
 
         #Start server
         server['uuid'] = new_instance
