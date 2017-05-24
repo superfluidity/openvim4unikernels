@@ -33,7 +33,7 @@ DBPORT="3306"
 DBNAME="vim_db"
 QUIET_MODE=""
 #TODO update it with the last database version
-LAST_DB_VERSION=18
+LAST_DB_VERSION=19
 
 # Detect paths
 MYSQL=$(which mysql)
@@ -186,7 +186,8 @@ fi
 #[ $OPENVIM_VER_NUM -ge 5009 ] && DATABASE_TARGET_VER_NUM=16  #0.5.9   => 16
 #[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
 #[ $OPENVIM_VER_NUM -ge 5013 ] && DATABASE_TARGET_VER_NUM=18  #0.5.13  => 18
-#TODO ... put next versions here
+#[ $OPENVIM_VER_NUM -ge 5015 ] && DATABASE_TARGET_VER_NUM=19  #0.5.15  => 19
+# TODO ... put next versions here
 
 function upgrade_to_1(){
     # echo "    upgrade database from version 0.0 to version 0.1"
@@ -653,7 +654,8 @@ function upgrade_to_18(){
             "DROP INDEX type_vlan;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "    Fill 'region' with __OVS__/__DATA__ for OVS/openflow provider at nets"
     echo "UPDATE nets set region='__OVS__' where provider like 'OVS%';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
-    echo "UPDATE nets set region='__DATA__' where type='data' or type='ptp';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "UPDATE nets set region='__DATA__' where type='data' or type='ptp';" | $DBCMD || ! echo "ERROR. Aborted!" ||
+         exit -1
     echo "    Create new index region_vlan at nets"
 	echo "ALTER TABLE nets ADD UNIQUE INDEX region_vlan (region, vlan);" \
 	     | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
@@ -669,6 +671,22 @@ function downgrade_from_18(){
 	echo "ALTER TABLE nets ADD UNIQUE INDEX type_vlan (type, vlan);" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '18';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
+
+function upgrade_to_19(){
+    echo "    Add 'keyfile' to 'hosts'"
+    echo "ALTER TABLE hosts ADD COLUMN keyfile VARCHAR(255) NULL DEFAULT NULL AFTER password;" \
+            | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) "\
+            "VALUES (19, '0.19', '0.5.15', 'Add keyfile to hosts', '2017-05-23');"\
+         | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_19(){
+    echo "    Delete 'keyfile' from 'hosts'"
+    echo "ALTER TABLE hosts DROP COLUMN keyfile;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '19';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
 
 #TODO ... put funtions here
 

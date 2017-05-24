@@ -55,10 +55,10 @@ class LoadConfigurationException(Exception):
 
 
 def load_configuration(configuration_file):
-    default_tokens ={'http_port':9080, 'http_host':'localhost', 
-                     'of_controller_nets_with_same_vlan':True,
-                     'image_path':'/opt/VNF/images',
-                     'network_vlan_range_start':1000,
+    default_tokens ={'http_port': 9080, 'http_host': 'localhost',
+                     'of_controller_nets_with_same_vlan': True,
+                     'host_ssh_keyfile': None,
+                     'network_vlan_range_start': 1000,
                      'network_vlan_range_end': 4096,
                      'log_level': "DEBUG",
                      'log_level_db': "ERROR",
@@ -69,79 +69,98 @@ def load_configuration(configuration_file):
                      'ovs_controller_file_path': '/var/lib/',
             }
     try:
-        #First load configuration from configuration file
-        #Check config file exists
+        # First load configuration from configuration file
+        # Check config file exists
         if not os.path.isfile(configuration_file):
-            return (False, "Configuration file '"+configuration_file+"' does not exists")
+            raise LoadConfigurationException("Configuration file '{}' does not exists".format(configuration_file))
             
-        #Read and parse file
+        # Read and parse file
         (return_status, code) = af.read_file(configuration_file)
         if not return_status:
-            return (return_status, "Error loading configuration file '"+configuration_file+"': "+code)
-        try:
-            config = yaml.load(code)
-        except yaml.YAMLError, exc:
-            error_pos = ""
-            if hasattr(exc, 'problem_mark'):
-                mark = exc.problem_mark
-                error_pos = " at position: (%s:%s)" % (mark.line+1, mark.column+1)
-            return (False, "Error loading configuration file '"+configuration_file+"'"+error_pos+": content format error: Failed to parse yaml format")
-        
-        
-        try:
-            js_v(config, config_schema)
-        except js_e.ValidationError, exc:
-            error_pos = ""
-            if len(exc.path)>0: error_pos=" at '" + ":".join(map(str, exc.path))+"'"
-            return False, "Error loading configuration file '"+configuration_file+"'"+error_pos+": "+exc.message 
-        
-        
-        #Check default values tokens
-        for k,v in default_tokens.items():
-            if k not in config: config[k]=v
-        #Check vlan ranges
+            raise LoadConfigurationException("Error loading configuration file '{}': {}".format(
+                configuration_file, code))
+        config = yaml.load(code)
+        js_v(config, config_schema)
+        # Check default values tokens
+        for k, v in default_tokens.items():
+            if k not in config:
+                config[k] = v
+        # Check vlan ranges
         if config["network_vlan_range_start"]+10 >= config["network_vlan_range_end"]:
-            return False, "Error invalid network_vlan_range less than 10 elements"
-    
-    except Exception,e:
-        return (False, "Error loading configuration file '"+configuration_file+"': "+str(e))
-    return (True, config)
+            raise LoadConfigurationException("Error at configuration file '{}'. Invalid network_vlan_range less than 10 elements".format)
+        return config
+    except yaml.YAMLError as exc:
+        error_pos = ""
+        if hasattr(exc, 'problem_mark'):
+            mark = exc.problem_mark
+            error_pos = " at position: ({}:{})".format(mark.line + 1, mark.column + 1)
+        raise LoadConfigurationException("Error loading configuration file '{}'{}: {}\n"
+                                         "Use a valid yaml format. Indentation matters, "
+                                         "and tabs characters are not valid".format(
+                                             configuration_file, error_pos, exc))
+    except js_e.ValidationError as exc:
+        error_pos = ""
+        if len(exc.path) > 0:
+            error_pos = " at '{}'".format(":".join(map(str, exc.path)))
+        raise LoadConfigurationException("Error loading configuration file '{}'{}: {}".format(
+            configuration_file, error_pos, exc))
+
+    # except Exception as e:
+    #     raise LoadConfigurationException("Error loading configuration file '{}': {}".format(configuration_file, e))
+
 
 def usage():
-    print "Usage: ", sys.argv[0], "[options]"
-    print "      -v|--version: prints current version"
-    print "      -c|--config FILE: loads the configuration file (default: osm_openvim/openvimd.cfg)"
-    print "      -h|--help: shows this help"
-    print "      -p|--port PORT: changes port number and overrides the port number in the configuration file (default: 908)"
-    print "      -P|--adminport PORT: changes admin port number and overrides the port number in the configuration file (default: not listen)"
-    print "      --dbname NAME: changes db_name and overrides the db_name in the configuration file"
-    #print( "      --log-socket-host HOST: send logs to this host")
-    #print( "      --log-socket-port PORT: send logs using this port (default: 9022)")
-    print( "      --log-file FILE: send logs to this file")
+    print ("Usage: ", sys.argv[0], "[options]")
+    print ("      -v|--version: prints current version")
+    print ("      -c|--config FILE: loads the configuration file (default: osm_openvim/openvimd.cfg)")
+    print ("      -h|--help: shows this help")
+    print ("      -p|--port PORT: changes port number and overrides the port number in the configuration file "
+           "(default: 908)")
+    print ("      -P|--adminport PORT: changes admin port number and overrides the port number in the configuration "
+           "file (default: not listen)")
+    print ("      --dbname NAME: changes db_name and overrides the db_name in the configuration file")
+    # print( "      --log-socket-host HOST: send logs to this host")
+    # print( "      --log-socket-port PORT: send logs using this port (default: 9022)")
+    print ("      --log-file FILE: send logs to this file")
     return
 
 
-if __name__=="__main__":
+def set_logging_file(log_file):
+    try:
+        file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=100e6, backupCount=9, delay=0)
+        file_handler.setFormatter(log_formatter_simple)
+        logger.addHandler(file_handler)
+        # logger.debug("moving logs to '%s'", global_config["log_file"])
+        # remove initial stream handler
+        logging.root.removeHandler(logging.root.handlers[0])
+        print ("logging on '{}'".format(log_file))
+    except IOError as e:
+        raise LoadConfigurationException(
+            "Cannot open logging file '{}': {}. Check folder exist and permissions".format(log_file, e))
+
+
+if __name__ == "__main__":
     hostname = socket.gethostname()
-    #streamformat = "%(levelname)s (%(module)s:%(lineno)d) %(message)s"
-    log_formatter_complete = logging.Formatter(
-        '%(asctime)s.%(msecs)03d00Z[{host}@openmanod] %(filename)s:%(lineno)s severity:%(levelname)s logger:%(name)s log:%(message)s'.format(host=hostname),
-        datefmt='%Y-%m-%dT%H:%M:%S',
-    )
-    log_format_simple =  "%(asctime)s %(levelname)s  %(name)s %(filename)s:%(lineno)s %(message)s"
+    # streamformat = "%(levelname)s (%(module)s:%(lineno)d) %(message)s"
+    log_formatter_complete = logging.Formatter('%(asctime)s.%(msecs)03d00Z[{host}@openmanod] %(filename)s:%(lineno)s '
+                                               'severity:%(levelname)s logger:%(name)s log:%(message)s'.format(
+                                                    host=hostname),
+                                datefmt='%Y-%m-%dT%H:%M:%S')
+    log_format_simple = "%(asctime)s %(levelname)s  %(name)s %(filename)s:%(lineno)s %(message)s"
     log_formatter_simple = logging.Formatter(log_format_simple, datefmt='%Y-%m-%dT%H:%M:%S')
     logging.basicConfig(format=log_format_simple, level=logging.DEBUG)
     logger = logging.getLogger('openvim')
     logger.setLevel(logging.DEBUG)
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:", ["config=", "help", "version", "port=", "adminport=", "log-file=", "dbname="])
-    except getopt.GetoptError, err:
+        opts, args = getopt.getopt(sys.argv[1:], "hvc:p:P:",
+                                   ["config=", "help", "version", "port=", "adminport=", "log-file=", "dbname="])
+    except getopt.GetoptError as err:
         # print help information and exit:
-        logger.error("%s. Type -h for help", err) # will print something like "option -a not recognized"
-        #usage()
-        sys.exit(-2)
+        logger.error("%s. Type -h for help", err)  # will print something like "option -a not recognized"
+        # usage()
+        sys.exit(2)
 
-    port=None
+    port = None
     port_admin = None
     config_file = 'osm_openvim/openvimd.cfg'
     log_file = None
@@ -149,8 +168,8 @@ if __name__=="__main__":
 
     for o, a in opts:
         if o in ("-v", "--version"):
-            print "openvimd version", ovim.ovim.get_version(), ovim.ovim.get_version_date()
-            print "(c) Copyright Telefonica"
+            print ("openvimd version", ovim.ovim.get_version(), ovim.ovim.get_version_date())
+            print ("(c) Copyright Telefonica")
             sys.exit(0)
         elif o in ("-h", "--help"):
             usage()
@@ -168,34 +187,27 @@ if __name__=="__main__":
         else:
             assert False, "Unhandled option"
 
-    
     engine = None
     http_thread = None
     http_thread_admin = None
 
     try:
-        #Load configuration file
-        r, config_dic = load_configuration(config_file)
-        #print config_dic
-        if not r:
-            logger.error(config_dic)
-            config_dic={}
-            exit(-1)
         if log_file:
-            try:
-                file_handler= logging.handlers.RotatingFileHandler(log_file, maxBytes=100e6, backupCount=9, delay=0)
-                file_handler.setFormatter(log_formatter_simple)
-                logger.addHandler(file_handler)
-                #logger.debug("moving logs to '%s'", global_config["log_file"])
-                #remove initial stream handler
-                logging.root.removeHandler(logging.root.handlers[0])
-                print ("logging on '{}'".format(log_file))
-            except IOError as e:
-                raise LoadConfigurationException("Cannot open logging file '{}': {}. Check folder exist and permissions".format(log_file, str(e)) ) 
+            set_logging_file(log_file)
+        # Load configuration file
+        config_dic = load_configuration(config_file)
+        if config_dic.get("dhcp_server"):
+            if config_dic["dhcp_server"].get("key"):
+                config_dic["dhcp_server"]["keyfile"] = config_dic["dhcp_server"].pop("key")
+        if config_dic.get("image_path"):
+            config_dic["host_image_path"] = config_dic.pop("image_path")
+        elif not config_dic.get("host_image_path"):
+            config_dic["host_image_path"] = '/opt/VNF/images'   # default value
+        # print config_dic
 
         logger.setLevel(getattr(logging, config_dic['log_level']))
         logger.critical("Starting openvim server command: '%s'", sys.argv[0])
-        #override parameters obtained by command line
+        # override parameters obtained by command line
         if port: 
             config_dic['http_port'] = port
         if port_admin:
@@ -203,21 +215,24 @@ if __name__=="__main__":
         if db_name: 
             config_dic['db_name'] = db_name
         
-        #check mode
+        # check mode
         if 'mode' not in config_dic:
             config_dic['mode'] = 'normal'
-            #allow backward compatibility of test_mode option
+            # allow backward compatibility of test_mode option
             if 'test_mode' in config_dic and config_dic['test_mode']==True:
                 config_dic['mode'] = 'test' 
         if config_dic['mode'] == 'development' and config_dic['network_type'] == 'bridge' and \
-                ( 'development_bridge' not in config_dic or config_dic['development_bridge'] not in config_dic.get("bridge_ifaces",None) ):
-            logger.error("'%s' is not a valid 'development_bridge', not one of the 'bridge_ifaces'", config_file)
-            exit(-1)
+                ('development_bridge' not in config_dic or
+                             config_dic['development_bridge'] not in config_dic.get("bridge_ifaces",None)):
+            error_msg = "'{}' is not a valid 'development_bridge', not one of the 'bridge_ifaces'".format(config_file)
+            print (error_msg)
+            logger.error(error_msg)
+            exit(1)
 
         if config_dic['mode'] != 'normal':
-            print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-            print "!! Warning, openvimd in TEST mode '%s'" % config_dic['mode']
-            print '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+            print ('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            print ("!! Warning, openvimd in TEST mode '{}'".format(config_dic['mode']))
+            print ('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
         config_dic['version'] = ovim.ovim.get_version()
         config_dic["logger_name"] = "openvim"
 
@@ -225,46 +240,42 @@ if __name__=="__main__":
         engine.start_service()
 
         
-    #Create thread to listen to web requests
-        http_thread = httpserver.httpserver(engine, 'http', config_dic['http_host'], config_dic['http_port'], False, config_dic)
+    # Create thread to listen to web requests
+        http_thread = httpserver.httpserver(engine, 'http', config_dic['http_host'], config_dic['http_port'],
+                                            False, config_dic)
         http_thread.start()
-        
+
         if 'http_admin_port' in config_dic:
             engine2 = ovim.ovim(config_dic)
-            http_thread_admin = httpserver.httpserver(engine2, 'http-admin', config_dic['http_host'], config_dic['http_admin_port'], True)
+            http_thread_admin = httpserver.httpserver(engine2, 'http-admin', config_dic['http_host'],
+                                                      config_dic['http_admin_port'], True)
             http_thread_admin.start()
         else:
             http_thread_admin = None
-        time.sleep(1)      
+        time.sleep(1)
         logger.info('Waiting for http clients')
         print ('openvimd ready')
         print ('====================')
         sys.stdout.flush()
-        
+
         #TODO: Interactive console would be nice here instead of join or sleep
-        
-        r="help" #force print help at the beginning
+
+        r = ""
         while True:
-            if r=='exit':
-                break      
-            elif r!='':
+            if r == 'exit':
+                break
+            elif r != '':
                 print "type 'exit' for terminate"
-            r = raw_input('> ')
+            try:
+                r = raw_input('> ')
+            except EOFError:
+                time.sleep(86400)
 
     except (KeyboardInterrupt, SystemExit):
         pass
-    except SystemExit:
-        pass
-    except getopt.GetoptError as e:
-        logger.critical(str(e)) # will print something like "option -a not recognized"
-        #usage()
-        exit(-1)
-    except LoadConfigurationException as e:
-        logger.critical(str(e))
-        exit(-1)
-    except ovim.ovimException as e:
-        logger.critical(str(e))
-        exit(-1)
+    except (getopt.GetoptError, LoadConfigurationException, ovim.ovimException) as e:
+        logger.critical(str(e))   # will print something like "option -a not recognized"
+        exit(1)
 
     logger.info('Exiting openvimd')
     if engine:
@@ -273,7 +284,5 @@ if __name__=="__main__":
         http_thread.join(1)
     if http_thread_admin:
         http_thread_admin.join(1)
-
-    logger.debug( "bye!")
+    logger.debug("bye!")
     exit()
-

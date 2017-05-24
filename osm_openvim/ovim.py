@@ -42,9 +42,9 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.14-r530"
+__version__ = "0.5.15-r531"
 version_date = "May 2017"
-database_version = 18      #needed database schema version
+database_version = 19      #needed database schema version
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -244,16 +244,18 @@ class ovim():
         host_develop_bridge_iface = self.config.get('development_bridge', None)
 
         # get host list from data base before starting threads
-        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid'), FROM='hosts', WHERE={'status': 'ok'})
+        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid', 'password', 'keyfile'),
+                                     FROM='hosts', WHERE={'status': 'ok'})
         if r < 0:
             raise ovimException("Cannot get hosts from database {}".format(hosts))
 
         self.config['host_threads'] = {}
         for host in hosts:
-            host['image_path'] = '/opt/VNF/images/openvim'
             thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=self.config["db"],
+                                    password=host['password'],
+                                    keyfile=host.get('keyfile', self.config["host_ssh_keyfile"]),
                                     db_lock=self.config["db_lock"], test=host_test_mode,
-                                    image_path=self.config['image_path'],
+                                    image_path=self.config['host_image_path'],
                                     version=self.config['version'], host_id=host['uuid'],
                                     develop_mode=host_develop_mode,
                                     develop_bridge_iface=host_develop_bridge_iface,
@@ -270,13 +272,20 @@ class ovim():
 
         for net in content:
             net_type = net['type']
-            if (net_type == 'bridge_data' or net_type == 'bridge_man') \
-                    and net["provider"][:4] == 'OVS:' and net["enable_dhcp"] == "true":
+            if (net_type == 'bridge_data' or net_type == 'bridge_man') and \
+                    net["provider"][:4] == 'OVS:' and net["enable_dhcp"] == "true":
+                try:
                     self.launch_dhcp_server(net['vlan'],
                                             net['dhcp_first_ip'],
                                             net['dhcp_last_ip'],
                                             net['cidr'],
                                             net['gateway_ip'])
+                except Exception as e:
+                    self.logger.error("Fail at launching dhcp server for net_id='%s' net_name='%s': %s",
+                                      net["uuid"], net["name"], str(e))
+                    self.db.update_rows("nets", {"status": "ERROR",
+                                                 "last_error": "Fail at launching dhcp server: " + str(e)},
+                                        {"uuid": net["uuid"]})
 
     def _start_of_db_tasks(self):
         """
@@ -432,9 +441,13 @@ class ovim():
         if 'dhcp_thread' in self.config:
             threads['dhcp'] = (self.config['dhcp_thread'])
 
-        for thread in threads.values():
+        for thread_id, thread in threads.items():
+            if thread_id == 'openvim_controller':
+                continue
             thread.insert_task("exit")
-        for thread in threads.values():
+        for thread_id, thread in threads.items():
+            if thread_id == 'openvim_controller':
+                continue
             thread.join()
 
     def get_networks(self, columns=None, db_filter={}, limit=None):
@@ -1346,19 +1359,21 @@ class ovim():
 
         bridge_ifaces = []
         controller_ip = self.config['ovs_controller_ip']
-        ovs_controller_user = self.config['ovs_controller_user']
+        ovs_controller_user = self.config.get('ovs_controller_user')
 
         host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
         host_develop_mode = True if self.config['mode'] == 'development' else False
 
         dhcp_host = ht.host_thread(name='openvim_controller', user=ovs_controller_user, host=controller_ip,
+                                   password=self.config.get('ovs_controller_password'),
+                                   keyfile=self.config.get('ovs_controller_keyfile'),
                                    db=self.config["db"], db_lock=self.config["db_lock"], test=host_test_mode,
-                                   image_path=self.config['image_path'], version=self.config['version'],
+                                   image_path=self.config['host_image_path'], version=self.config['version'],
                                    host_id='openvim_controller', develop_mode=host_develop_mode,
                                    develop_bridge_iface=bridge_ifaces,
                                    logger_name=self.logger_name + ".host.controller",
                                    debug=self.config.get('log_level_host'))
-        dhcp_host.start()
+        # dhcp_host.start()
         self.config['host_threads']['openvim_controller'] = dhcp_host
         if not host_test_mode:
             dhcp_host.ssh_connect()

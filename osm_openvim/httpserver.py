@@ -55,20 +55,20 @@ global my
 global url_base
 global config_dic
 global RADclass_module
-RADclass=None  #RADclass module is charged only if not in test mode
+RADclass_module=None  #RADclass module is charged only if not in test mode
 
 url_base="/openvim"
 
 HTTP_Bad_Request =          400
-HTTP_Unauthorized =         401 
-HTTP_Not_Found =            404 
+HTTP_Unauthorized =         401
+HTTP_Not_Found =            404
 HTTP_Forbidden =            403
-HTTP_Method_Not_Allowed =   405 
+HTTP_Method_Not_Allowed =   405
 HTTP_Not_Acceptable =       406
 HTTP_Request_Timeout =      408
 HTTP_Conflict =             409
-HTTP_Service_Unavailable =  503 
-HTTP_Internal_Server_Error= 500 
+HTTP_Service_Unavailable =  503
+HTTP_Internal_Server_Error= 500
 
 def md5(fname):
     hash_md5 = hashlib.md5()
@@ -524,6 +524,7 @@ def http_get_host_id(host_id):
 @bottle.route(url_base + '/hosts', method='POST')
 def http_post_hosts():
     '''insert a host into the database. All resources are got and inserted'''
+    global RADclass_module
     my = config_dic['http_threads'][ threading.current_thread().name ]
     #check permissions
     if not my.admin:
@@ -535,17 +536,17 @@ def http_post_hosts():
     if r is not None: print "http_post_host_id: Warning: remove extra items ", r
     change_keys_http2db(http_content['host'], http2db_host)
 
-    host = http_content['host']
-    warning_text=""
-    if 'host-data' in http_content:
-        host.update(http_content['host-data'])
-        ip_name=http_content['host-data']['ip_name']
-        user=http_content['host-data']['user']
-        password=http_content['host-data'].get('password', None)
+    if 'host' in http_content:
+        host = http_content['host']
+        if 'host-data' in http_content:
+            host.update(http_content['host-data'])
     else:
-        ip_name=host['ip_name']
-        user=host['user']
-        password=host.get('password', None)
+        host = http_content['host-data']
+    warning_text = ""
+    ip_name = host['ip_name']
+    user = host['user']
+    password = host.get('password')
+    if host.get('autodiscover'):
         if not RADclass_module:
             try:
                 RADclass_module = imp.find_module("RADclass")
@@ -618,10 +619,13 @@ def http_post_hosts():
             memory=node['memory']['node_size'] / (1024*1024*1024)
             #memory=get_next_2pow(node['memory']['hugepage_nr'])
             host['numas'].append( {'numa_socket': node['id'], 'hugepages': node['memory']['hugepage_nr'], 'memory':memory, 'interfaces': interfaces, 'cores': cores } )
-    print json.dumps(host, indent=4)
-    #return
-    #
-    #insert in data base
+    # print json.dumps(host, indent=4)
+    # insert in data base
+    if "created_at" in host:
+        del host["created_at"]
+    for numa in host.get("numas", ()):
+        if "hugepages_consumed" in numa:
+            del numa["hugepages_consumed"]
     result, content = my.db.new_host(host)
     if result >= 0:
         if content['admin_state_up']:
@@ -629,10 +633,13 @@ def http_post_hosts():
             host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
             host_develop_mode = True if config_dic['mode']=='development' else False
             host_develop_bridge_iface = config_dic.get('development_bridge', None)
-            thread = ht.host_thread(name=host.get('name',ip_name), user=user, host=ip_name, db=config_dic['db'], db_lock=config_dic['db_lock'], 
-                test=host_test_mode, image_path=config_dic['image_path'],
-                version=config_dic['version'], host_id=content['uuid'],
-                develop_mode=host_develop_mode, develop_bridge_iface=host_develop_bridge_iface   )
+            thread = ht.host_thread(name=host.get('name',ip_name), user=user, host=ip_name,
+                                    password=host.get('password'),
+                                    keyfile=host.get('keyfile', config_dic["host_ssh_keyfile"]),
+                                    db=config_dic['db'], db_lock=config_dic['db_lock'],
+                                    test=host_test_mode, image_path=config_dic['host_image_path'],
+                                    version=config_dic['version'], host_id=content['uuid'],
+                                    develop_mode=host_develop_mode, develop_bridge_iface=host_develop_bridge_iface)
             thread.start()
             config_dic['host_threads'][ content['uuid'] ] = thread
 

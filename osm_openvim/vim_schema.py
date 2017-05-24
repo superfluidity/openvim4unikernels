@@ -31,7 +31,7 @@ __date__ ="$10-jul-2014 12:07:15$"
 # SCHEMAS to validate input data
 #
 
-path_schema={"type":"string", "pattern":"^(\.){0,2}(/[^/\"':{}\(\)]+)+$"}
+path_schema = {"type": "string", "maxLength": 255, "pattern": "^(\.){0,2}(/[^/\"':{}\(\)]+)+$"}
 http_schema={"type":"string", "pattern":"^https?://[^'\"=]+$"}
 port_schema={"type":"integer","minimum":1,"maximun":65534}
 ip_schema={"type":"string","pattern":"^([0-9]{1,3}.){3}[0-9]{1,3}$"}
@@ -55,9 +55,9 @@ yes_no_schema={"type":"string", "enum":["yes", "no"]}
 log_level_schema={"type":"string", "enum":["DEBUG", "INFO", "WARNING","ERROR","CRITICAL"]}
 
 config_schema = {
-    "title":"main configuration information schema",
+    "title": "main configuration information schema",
     "$schema": "http://json-schema.org/draft-04/schema#",
-    "type":"object",
+    "type": "object",
     "properties":{
         "http_port": port_schema,
         "http_admin_port": port_schema,
@@ -65,7 +65,7 @@ config_schema = {
         "http_url_prefix": path_schema, # it does not work yet; it's supposed to be the base path to be used by bottle, but it must be explicitly declared
         "db_host": nameshort_schema,
         "db_user": nameshort_schema,
-        "db_passwd": {"type":"string"},
+        "db_passwd": {"type": "string"},
         "db_name": nameshort_schema,
         "of_controller_ip": ip_schema,
         "of_controller_port": port_schema,
@@ -75,18 +75,20 @@ config_schema = {
         "of_controller_module": {"type":"string"},
         "of_user": nameshort_schema,
         "of_password": nameshort_schema,
-        "test_mode": {"type": "boolean"}, #leave for backward compatibility
+        "test_mode": {"type": "boolean"}, # leave for backward compatibility
         "mode": {"type":"string", "enum":["normal", "host only", "OF only", "development", "test"] },
         "development_bridge": {"type":"string"},
         "tenant_id": {"type" : "string"},
-        "image_path": path_schema,
+        "image_path": path_schema,      # leave for backward compatibility
+        "host_image_path": path_schema,
+        "host_ssh_keyfile": path_schema,
         "network_vlan_range_start": vlan_schema,
         "network_vlan_range_end": vlan_schema,
         "bridge_ifaces": {
             "type": "object",
             "patternProperties": {
                 "." : {
-                    "type": "array", 
+                    "type": "array",
                     "items": integer0_schema,
                     "minItems":2,
                     "maxItems":2,
@@ -97,18 +99,19 @@ config_schema = {
         "dhcp_server": {
             "type": "object",
             "properties": {
-                "host" : name_schema,
-                "port" : port_schema,
-                "provider" : {"type": "string", "enum": ["isc-dhcp-server"]},
-                "user" : nameshort_schema,
-                "password" : {"type": "string"},
-                "key" : {"type": "string"},
-                "bridge_ifaces" :{
-                    "type": "array", 
+                "host": name_schema,
+                "port": port_schema,
+                "provider": {"type": "string", "enum": ["isc-dhcp-server"]},
+                "user": nameshort_schema,
+                "password": {"type": "string"},
+                "key": path_schema,         # for backward compatibility, use keyfile instead
+                "keyfile": path_schema,
+                "bridge_ifaces": {
+                    "type": "array",
                     "items": nameshort_schema,
                 },
-                "nets" :{
-                    "type": "array", 
+                "nets": {
+                    "type": "array",
                     "items": name_schema,
                 },
             },
@@ -119,9 +122,10 @@ config_schema = {
         "log_level_of": log_level_schema,
         "network_type": {"type": "string", "enum": ["ovs", "bridge"]},
         "ovs_controller_file_path": path_schema,
+        "ovs_controller_ip": nameshort_schema,
         "ovs_controller_user": nameshort_schema,
-
-        "ovs_controller_ip": nameshort_schema
+        "ovs_controller_password": {"type": "string"},
+        "ovs_controller_keyfile": path_schema,
     },
     "patternProperties": {
         "of_*" : {"type": ["string", "integer", "boolean"]}
@@ -249,90 +253,97 @@ extended_schema={
 host_data_schema={
     "title":"hosts manual insertion information schema",
     "type":"object", 
-    "properties":{                  
-        "ip_name":nameshort_schema,
+    "properties":{
+        "id": id_schema,
+        "admin_state_up": {"type": "boolean"},
+        "created_at": {"type": "string"},        # ignored, just for compatibility with host-list
+        "ip_name": nameshort_schema,
         "name": name_schema,
-        "description":description_schema,
-        "user":nameshort_schema,
-        "password":nameshort_schema,
-        "features":description_schema,
-        "ranking":integer0_schema,
-        "devices":{
+        "description": description_schema,
+        "user": nameshort_schema,
+        "password": nameshort_schema,
+        "keyfile": path_schema,
+        "features": description_schema,
+        "ranking": integer0_schema,
+        "autodiscover": {"type": "boolean"},    # try to discover host parameters instead of providing in this schema
+        "devices": {
             "type": "array", 
-            "items":{
+            "items": {
                 "type": "object",
-                "properties":{
-                    "type":{"type":"string", "enum":["usb","disk"]},
-                    "vpci":pci_schema
+                "properties": {
+                    "type": {"type": "string", "enum": ["usb", "disk"]},
+                    "vpci": pci_schema
                 },
                 "additionalProperties": False,
                 "required": ["type"]
             }
         },
-        "numas":{
+        "numas": {
             "type": "array",
-            "minItems":1,
-            "items":{
+            "minItems": 1,
+            "items": {
                 "type": "object",
-                "properties":{
-                    "admin_state_up":{"type":"boolean"},
-                    "hugepages":integer0_schema,
+                "properties": {
+                    "admin_state_up": {"type": "boolean"},
+                    "hugepages": integer0_schema,
+                    "hugepages_consumed": integer0_schema,  # ignored, just for compatibility with host-list
+                    "numa_socket": integer0_schema,
+                    "memory": integer1_schema,
                     "cores":{
                         "type": "array",
-                        "minItems":2,
-                        "items":{
+                        "minItems": 2,
+                        "items": {
                             "type": "object",
-                            "properties":{
-                                "core_id":integer0_schema,
-                                "thread_id":integer0_schema,
-                                "status": {"type":"string", "enum":["noteligible"]}
+                            "properties": {
+                                "core_id": integer0_schema,
+                                "thread_id": integer0_schema,
+                                "status": {"type": "string", "enum": ["noteligible"]}
                             },
                             "additionalProperties": False,
-                            "required": ["core_id","thread_id"]
+                            "required": ["core_id", "thread_id"]
                         }
                     },
-                    "interfaces":{
+                    "interfaces": {
                         "type": "array",
-                        "minItems":1,
-                        "items":{
+                        "minItems": 1,
+                        "items": {
                             "type": "object",
-                            "properties":{
-                                "source_name":nameshort_schema,
-                                "mac":mac_schema,
-                                "Mbps":integer0_schema,
-                                "pci":pci_schema,
-                                "sriovs":{
+                            "properties": {
+                                "source_name": nameshort_schema,
+                                "mac": mac_schema,
+                                "Mbps": integer0_schema,
+                                "pci": pci_schema,
+                                "sriovs": {
                                     "type": "array",
                                     "minItems":1,
-                                    "items":{
+                                    "items": {
                                         "type": "object",
-                                        "properties":{
-                                            "source_name":{"oneOf":[integer0_schema, nameshort_schema]},
-                                            "mac":mac_schema,
-                                            "vlan":integer0_schema, 
-                                            "pci":pci_schema,
+                                        "properties": {
+                                            "source_name": {"oneOf": [integer0_schema, nameshort_schema]},
+                                            "mac": mac_schema,
+                                            "vlan": integer0_schema,  # ignored, just for backward compatibility
+                                            "pci": pci_schema,
                                         },
                                         "additionalProperties": False,
-                                        "required": ["source_name","mac","pci"]
+                                        "required": ["source_name", "mac", "pci"]
                                     }
                                 },
                                 "switch_port": nameshort_schema,
                                 "switch_dpid": nameshort_schema,
+                                "switch_mac": mac_schema,
                             },
                             "additionalProperties": False,
-                            "required": ["source_name","mac","Mbps","pci"]
+                            "required": ["source_name", "mac", "Mbps", "pci"]
                         }
                     },
-                    "numa_socket":integer0_schema,
-                    "memory":integer1_schema
                 },
                 "additionalProperties": False,
-                "required": ["cores","numa_socket"]
+                "required": ["cores", "numa_socket"]
             }
         }
     },
     "additionalProperties": False,
-    "required": ["ranking", "numas","ip_name","user"]
+    "required": ["name", "ip_name"]
 }
 
 host_edit_schema={
@@ -388,19 +399,7 @@ host_new_schema = {
     "$schema": "http://json-schema.org/draft-04/schema#",
     "type":"object",
     "properties":{
-        "host":{
-            "type":"object",
-            "properties":{
-                "id":id_schema,
-                "ip_name":nameshort_schema,
-                "name": name_schema,
-                "description":description_schema,
-                "user":nameshort_schema,
-                "password":nameshort_schema,
-                "admin_state_up":{"type":"boolean"},
-            },
-            "required": ["name","ip_name","user"]
-        },
+        "host": host_data_schema,
         "host-data":host_data_schema
     },
     "required": ["host"],

@@ -472,16 +472,19 @@ class vim_db():
                 with self.con:
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)
                     #get HOST
-                    cmd = "SELECT uuid, user, name, ip_name, description, ranking, admin_state_up, DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%s') as created_at \
-                        FROM hosts WHERE " + where_filter
+                    cmd = "SELECT uuid, user, password, keyfile, name, ip_name, description, ranking, admin_state_up, "\
+                          "DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%s') as created_at "\
+                          "FROM hosts WHERE " + where_filter
                     self.logger.debug(cmd) 
                     self.cur.execute(cmd)
-                    if self.cur.rowcount == 0 : 
+                    if self.cur.rowcount == 0:
                         return 0, "host '" + str(host_id) +"'not found."
                     elif self.cur.rowcount > 1 : 
                         return 0, "host '" + str(host_id) +"' matches more than one result."
                     host = self.cur.fetchone()
                     host_id = host['uuid']
+                    if host.get("password"):
+                        host["password"] = "*****"
                     #get numa
                     cmd = "SELECT id, numa_socket, hugepages, memory, admin_state_up FROM numas WHERE host_id = '" + str(host_id) + "'"
                     self.logger.debug(cmd)
@@ -504,20 +507,20 @@ class vim_db():
                         used = self.cur.fetchone()
                         used_= int(used['hugepages_consumed']) if used != None else 0
                         numa['hugepages_consumed'] = used_
-                        #get ports
-                        #cmd = "CALL GetPortsFromNuma(%s)'" % str(numa['id'])
-                        #self.cur.callproc('GetPortsFromNuma', (numa['id'],) )
-                        #every time a Procedure is launched you need to close and open the cursor 
-                        #under Error 2014: Commands out of sync; you can't run this command now
-                        #self.cur.close()   
-                        #self.cur = self.con.cursor(mdb.cursors.DictCursor)
-                        cmd="SELECT Mbps, pci, status, Mbps_used, instance_id, if(id=root_id,'PF','VF') as type_,\
-                             switch_port, switch_dpid, mac, source_name\
-                             FROM resources_port WHERE numa_id=%d ORDER BY root_id, type_ DESC" %  (numa['id'])
+                        # get ports
+                        # cmd = "CALL GetPortsFromNuma(%s)'" % str(numa['id'])
+                        # self.cur.callproc('GetPortsFromNuma', (numa['id'],) )
+                        # every time a Procedure is launched you need to close and open the cursor
+                        # under Error 2014: Commands out of sync; you can't run this command now
+                        # self.cur.close()
+                        # self.cur = self.con.cursor(mdb.cursors.DictCursor)
+                        cmd = "SELECT Mbps, pci, status, Mbps_used, instance_id, if(id=root_id,'PF','VF') as type_, "\
+                              "switch_port, switch_dpid, switch_mac, mac, source_name "\
+                              "FROM resources_port WHERE numa_id={} ORDER BY root_id, type_ DESC".format(numa['id'])
                         self.logger.debug(cmd)
                         self.cur.execute(cmd)
                         ifaces = self.cur.fetchall()
-                        #The SQL query will ensure to have SRIOV interfaces from a port first
+                        # The SQL query will ensure to have SRIOV interfaces from a port first
                         sriovs=[]
                         Mpbs_consumed = 0
                         numa['interfaces'] = []
@@ -533,6 +536,8 @@ class vim_db():
                                     del iface["switch_dpid"]
                                 if not iface["switch_port"]:
                                     del iface["switch_port"]
+                                if not iface["switch_mac"]:
+                                    del iface["switch_mac"]
                                 if sriovs:
                                     iface["sriovs"] = sriovs
                                 if Mpbs_consumed:
@@ -544,6 +549,7 @@ class vim_db():
                             else: #VF, SRIOV
                                 del iface["switch_port"]
                                 del iface["switch_dpid"]
+                                del iface["switch_mac"]
                                 del iface["type_"]
                                 del iface["Mbps"]
                                 sriovs.append(iface)

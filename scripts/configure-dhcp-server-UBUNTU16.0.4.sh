@@ -113,7 +113,7 @@ shift $((OPTIND-1))
 
 if [ $# -lt 1 ]
 then
-  usage
+  _usage
   exit
 fi
 

@@ -83,7 +83,7 @@ class dhcp_thread(threading.Thread):
             self.ssh_conn.load_system_host_keys()
             self.ssh_conn.connect(self.dhcp_params["host"], port=self.dhcp_params.get("port", 22),
                                   username=self.dhcp_params["user"], password=self.dhcp_params.get("password"),
-                                  key_filename=self.dhcp_params.get("key"), timeout=2)
+                                  key_filename=self.dhcp_params.get("keyfile"), timeout=2)
         except paramiko.ssh_exception.SSHException as e:
             self.logger.error("ssh_connect ssh Exception " + str(e))
         
@@ -222,7 +222,7 @@ class dhcp_thread(threading.Thread):
                     (_, stdout, _) = self.ssh_conn.exec_command(command)
                     content = stdout.read()
                 except paramiko.ssh_exception.SSHException as e:
-                    self.logger.error("get_ip_from_dhcp: ssh_Exception: " + srt(e))
+                    self.logger.error("get_ip_from_dhcp: ssh_Exception: " + str(e))
                     content = None
                     self.ssh_conn = None
                 except Exception as e:
