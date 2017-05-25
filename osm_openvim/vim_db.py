@@ -37,7 +37,7 @@ import uuid as myUuid
 import auxiliary_functions as af
 import json
 import logging
-from netaddr import IPNetwork, IPSet, IPRange, all_matching_cidrs
+from netaddr import IPNetwork, IPAddress
 
 HTTP_Bad_Request = 400
 HTTP_Unauthorized = 401 
@@ -1538,15 +1538,15 @@ class vim_db():
         :param ip_used_list: contain all used ips to avoid ip collisions
         :return:
         """
-
         ip_tools = IPNetwork(cidr)
         cidr_len = ip_tools.prefixlen
         ips = IPNetwork(first_ip + '/' + str(cidr_len))
-        ip_used_list.append(str(ips[0])) # first ip
-        ip_used_list.append(str(ips[1])) # gw ip
-        ip_used_list.append(str(ips[-1])) # broadcast ip
+
+        ip_used_list.append(str(ips[1]))  # gw ip
+        ip_used_list.append(str(ips[-1]))  # broadcast ip
+
         for vm_ip in ips:
-            if str(vm_ip) not in ip_used_list:
+            if str(vm_ip) not in ip_used_list and IPAddress(first_ip) <= IPAddress(vm_ip) <= IPAddress(last_ip):
                 return vm_ip
 
         return None

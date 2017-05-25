@@ -813,7 +813,7 @@ class host_thread(threading.Thread):
         self.db_lock.acquire()
         result, content = self.db.get_table(
             FROM='ports',
-            WHERE={'p.type': 'instance:ovs', 'p.net_id': net_uuid}
+            WHERE={'type': 'instance:ovs', 'net_id': net_uuid}
         )
         self.db_lock.release()
 
@@ -1211,6 +1211,11 @@ class host_thread(threading.Thread):
             content = stdout.read()
 
             command = 'sudo ip link set dev ovs-tap-' + str(vlan) + ' up'
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev lo up'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
