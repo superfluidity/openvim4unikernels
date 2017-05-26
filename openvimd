@@ -55,25 +55,25 @@ class LoadConfigurationException(Exception):
 
 
 def load_configuration(configuration_file):
-    default_tokens ={'http_port': 9080, 'http_host': 'localhost',
-                     'of_controller_nets_with_same_vlan': True,
-                     'host_ssh_keyfile': None,
-                     'network_vlan_range_start': 1000,
-                     'network_vlan_range_end': 4096,
-                     'log_level': "DEBUG",
-                     'log_level_db': "ERROR",
-                     'log_level_of': 'ERROR',
-                     'bridge_ifaces': {},
-                     'network_type': 'ovs',
-                     'ovs_controller_user': 'osm_dhcp',
-                     'ovs_controller_file_path': '/var/lib/',
-            }
+    default_tokens = {'http_port': 9080, 'http_host': 'localhost',
+                      'of_controller_nets_with_same_vlan': True,
+                      'host_ssh_keyfile': None,
+                      'network_vlan_range_start': 1000,
+                      'network_vlan_range_end': 4096,
+                      'log_level': "DEBUG",
+                      'log_level_db': "ERROR",
+                      'log_level_of': 'ERROR',
+                      'bridge_ifaces': {},
+                      'network_type': 'ovs',
+                      'ovs_controller_user': 'osm_dhcp',
+                      'ovs_controller_file_path': '/var/lib/',
+                      }
     try:
         # First load configuration from configuration file
         # Check config file exists
         if not os.path.isfile(configuration_file):
             raise LoadConfigurationException("Configuration file '{}' does not exists".format(configuration_file))
-            
+
         # Read and parse file
         (return_status, code) = af.read_file(configuration_file)
         if not return_status:
@@ -86,31 +86,33 @@ def load_configuration(configuration_file):
             if k not in config:
                 config[k] = v
         # Check vlan ranges
-        if config["network_vlan_range_start"]+10 >= config["network_vlan_range_end"]:
-            raise LoadConfigurationException("Error at configuration file '{}'. Invalid network_vlan_range less than 10 elements".format)
+        if config["network_vlan_range_start"] + 10 >= config["network_vlan_range_end"]:
+            raise LoadConfigurationException(
+                "Error at configuration file '{}'. Invalid network_vlan_range less than 10 elements".format(
+                    configuration_file))
         return config
     except yaml.YAMLError as exc:
         error_pos = ""
         if hasattr(exc, 'problem_mark'):
             mark = exc.problem_mark
             error_pos = " at position: ({}:{})".format(mark.line + 1, mark.column + 1)
-        raise LoadConfigurationException("Error loading configuration file '{}'{}: {}\n"
+        raise LoadConfigurationException("Bad YAML format at configuration file '{}'{}: {}\n"
                                          "Use a valid yaml format. Indentation matters, "
                                          "and tabs characters are not valid".format(
-                                             configuration_file, error_pos, exc))
+                                                configuration_file, error_pos, exc))
     except js_e.ValidationError as exc:
         error_pos = ""
         if len(exc.path) > 0:
             error_pos = " at '{}'".format(":".join(map(str, exc.path)))
-        raise LoadConfigurationException("Error loading configuration file '{}'{}: {}".format(
+        raise LoadConfigurationException("Invalid field at configuration file '{}'{}: {}".format(
             configuration_file, error_pos, exc))
 
-    # except Exception as e:
-    #     raise LoadConfigurationException("Error loading configuration file '{}': {}".format(configuration_file, e))
+        # except Exception as e:
+        #     raise LoadConfigurationException("Error loading configuration file '{}': {}".format(configuration_file, e))
 
 
 def usage():
-    print ("Usage: ", sys.argv[0], "[options]")
+    print ("Usage: {} [options]".format(sys.argv[0]))
     print ("      -v|--version: prints current version")
     print ("      -c|--config FILE: loads the configuration file (default: osm_openvim/openvimd.cfg)")
     print ("      -h|--help: shows this help")
@@ -144,8 +146,8 @@ if __name__ == "__main__":
     # streamformat = "%(levelname)s (%(module)s:%(lineno)d) %(message)s"
     log_formatter_complete = logging.Formatter('%(asctime)s.%(msecs)03d00Z[{host}@openmanod] %(filename)s:%(lineno)s '
                                                'severity:%(levelname)s logger:%(name)s log:%(message)s'.format(
-                                                    host=hostname),
-                                datefmt='%Y-%m-%dT%H:%M:%S')
+        host=hostname),
+        datefmt='%Y-%m-%dT%H:%M:%S')
     log_format_simple = "%(asctime)s %(levelname)s  %(name)s %(filename)s:%(lineno)s %(message)s"
     log_formatter_simple = logging.Formatter(log_format_simple, datefmt='%Y-%m-%dT%H:%M:%S')
     logging.basicConfig(format=log_format_simple, level=logging.DEBUG)
@@ -168,7 +170,7 @@ if __name__ == "__main__":
 
     for o, a in opts:
         if o in ("-v", "--version"):
-            print ("openvimd version", ovim.ovim.get_version(), ovim.ovim.get_version_date())
+            print ("openvimd version {} {}".format(ovim.ovim.get_version(), ovim.ovim.get_version_date()))
             print ("(c) Copyright Telefonica")
             sys.exit(0)
         elif o in ("-h", "--help"):
@@ -202,28 +204,28 @@ if __name__ == "__main__":
         if config_dic.get("image_path"):
             config_dic["host_image_path"] = config_dic.pop("image_path")
         elif not config_dic.get("host_image_path"):
-            config_dic["host_image_path"] = '/opt/VNF/images'   # default value
+            config_dic["host_image_path"] = '/opt/VNF/images'  # default value
         # print config_dic
 
         logger.setLevel(getattr(logging, config_dic['log_level']))
         logger.critical("Starting openvim server command: '%s'", sys.argv[0])
         # override parameters obtained by command line
-        if port: 
+        if port:
             config_dic['http_port'] = port
         if port_admin:
             config_dic['http_admin_port'] = port_admin
-        if db_name: 
+        if db_name:
             config_dic['db_name'] = db_name
-        
+
         # check mode
         if 'mode' not in config_dic:
             config_dic['mode'] = 'normal'
             # allow backward compatibility of test_mode option
-            if 'test_mode' in config_dic and config_dic['test_mode']==True:
-                config_dic['mode'] = 'test' 
+            if 'test_mode' in config_dic and config_dic['test_mode'] == True:
+                config_dic['mode'] = 'test'
         if config_dic['mode'] == 'development' and config_dic['network_type'] == 'bridge' and \
                 ('development_bridge' not in config_dic or
-                             config_dic['development_bridge'] not in config_dic.get("bridge_ifaces",None)):
+                         config_dic['development_bridge'] not in config_dic.get("bridge_ifaces", None)):
             error_msg = "'{}' is not a valid 'development_bridge', not one of the 'bridge_ifaces'".format(config_file)
             print (error_msg)
             logger.error(error_msg)
@@ -239,8 +241,7 @@ if __name__ == "__main__":
         engine = ovim.ovim(config_dic)
         engine.start_service()
 
-        
-    # Create thread to listen to web requests
+        # Create thread to listen to web requests
         http_thread = httpserver.httpserver(engine, 'http', config_dic['http_host'], config_dic['http_port'],
                                             False, config_dic)
         http_thread.start()
@@ -258,7 +259,7 @@ if __name__ == "__main__":
         print ('====================')
         sys.stdout.flush()
 
-        #TODO: Interactive console would be nice here instead of join or sleep
+        # TODO: Interactive console would be nice here instead of join or sleep
 
         r = ""
         while True:
@@ -274,7 +275,7 @@ if __name__ == "__main__":
     except (KeyboardInterrupt, SystemExit):
         pass
     except (getopt.GetoptError, LoadConfigurationException, ovim.ovimException) as e:
-        logger.critical(str(e))   # will print something like "option -a not recognized"
+        logger.critical(str(e))  # will print something like "option -a not recognized"
         exit(1)
 
     logger.info('Exiting openvimd')
