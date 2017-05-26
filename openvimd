@@ -24,8 +24,8 @@
 
 """
 This is the main program of openvim, it reads the configuration 
-and launches the rest of threads: http clients, openflow controller
-and host controllers  
+and launches the rest of threads: http clients, openflow controllers
+and host controllers, network controller
 """
 
 import osm_openvim.httpserver as httpserver
