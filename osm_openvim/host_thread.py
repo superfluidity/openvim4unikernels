@@ -435,8 +435,7 @@ class host_thread(threading.Thread):
         if topo == None and 'metadata' in dev_list[0]:
             topo = dev_list[0]['metadata'].get('topology', None)
     #name
-        name = server.get('name','') + "_" + server['uuid']
-        name = name[:58]  #qemu impose a length  limit of 59 chars or not start. Using 58
+        name = server.get('name', '')[:28] + "_" + server['uuid'][:28] #qemu impose a length  limit of 59 chars or not start. Using 58
         text += self.inc_tab() + "<name>" + name+ "</name>"
     #uuid
         text += self.tab() + "<uuid>" + server['uuid'] + "</uuid>" 
