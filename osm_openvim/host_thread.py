@@ -85,6 +85,7 @@ class host_thread(threading.Thread):
         self.develop_mode = develop_mode
         self.develop_bridge_iface = develop_bridge_iface
         self.image_path = image_path
+        self.empty_image_path = image_path
         self.host_id = host_id
         self.version = version
         
@@ -222,13 +223,14 @@ class host_thread(threading.Thread):
             tries-=1
             
             try:
-                command = 'cat > ' +  self.image_path + '/.openvim.yaml'
+                command = 'cat > ' + self.image_path + '/.openvim.yaml'
                 self.logger.debug("command:" + command)
                 (stdin, _, _) = self.ssh_conn.exec_command(command)
                 yaml.safe_dump(self.localinfo, stdin, explicit_start=True, indent=4, default_flow_style=False, tags=False, encoding='utf-8', allow_unicode=True)
+
                 self.localinfo_dirty = False
                 break #while tries
-    
+
             except paramiko.ssh_exception.SSHException as e:
                 text = e.args[0]
                 self.logger.error("save_localinfo ssh Exception: " + text)
@@ -574,7 +576,7 @@ class host_thread(threading.Thread):
                 #else:
                 #    return -1, 'Unknown disk type ' + v['type']
                 vpci = dev.get('vpci',None)
-                if vpci == None:
+                if vpci == None and 'metadata' in dev:
                     vpci = dev['metadata'].get('vpci',None)
                 text += self.pci2xml(vpci)
                
@@ -1357,6 +1359,24 @@ class host_thread(threading.Thread):
         else:
             self.logger.error("qemu_change_backing error: " + content)
             return -1
+
+    def qemu_create_empty_disk(self, dev):
+
+        if not dev and 'source' not in dev and 'file format' not in dev and 'image_size' not in dev:
+            self.logger.error("qemu_create_empty_disk error: missing image parameter")
+            return -1
+
+        empty_disk_path = dev['source file']
+
+        command = 'qemu-img create -f qcow2 ' + empty_disk_path + ' ' + str(dev['image_size']) + 'G'
+        self.logger.debug("command: " + command)
+        (_, _, stderr) = self.ssh_conn.exec_command(command)
+        content = stderr.read()
+        if len(content) == 0:
+            return 0
+        else:
+            self.logger.error("qemu_create_empty_disk error: " + content)
+            return -1
     
     def get_notused_filename(self, proposed_name, suffix=''):
         '''Look for a non existing file_name in the host
@@ -1528,31 +1548,45 @@ class host_thread(threading.Thread):
             devices = [  {"type":"disk", "image_id":server['image_id'], "vpci":server_metadata.get('vpci', None) } ] 
             if 'extended' in server_data and server_data['extended']!=None and "devices" in server_data['extended']:
                 devices += server_data['extended']['devices']
-
+            empty_path = None
             for dev in devices:
-                if dev['image_id'] == None:
+                image_id = dev.get('image_id')
+                if not image_id:
+                    import uuid
+                    uuid_empty = str(uuid.uuid4())
+                    empty_path = self.empty_image_path + uuid_empty + '.qcow2' # local path for empty disk
+
+                    dev['source file'] = empty_path
+                    dev['file format'] = 'qcow2'
+                    self.qemu_create_empty_disk(dev)
+                    server_host_files[uuid_empty] = {'source file': empty_path,
+                                                     'file format': dev['file format']}
+
                     continue
-                
-                self.db_lock.acquire()
-                result, content = self.db.get_table(FROM='images', SELECT=('path', 'metadata'),
-                                                    WHERE={'uuid': dev['image_id']})
-                self.db_lock.release()
-                if result <= 0:
-                    error_text = "ERROR", result, content, "when getting image", dev['image_id']
-                    self.logger.error("launch_server " + error_text)
-                    return -1, error_text
-                if content[0]['metadata'] is not None:
-                    dev['metadata'] = json.loads(content[0]['metadata'])
                 else:
-                    dev['metadata'] = {}
-                
-                if dev['image_id'] in server_host_files:
-                    dev['source file'] = server_host_files[ dev['image_id'] ] ['source file'] #local path
-                    dev['file format'] = server_host_files[ dev['image_id'] ] ['file format'] # raw or qcow2
-                    continue
+                    self.db_lock.acquire()
+                    result, content = self.db.get_table(FROM='images', SELECT=('path', 'metadata'),
+                                                        WHERE={'uuid': image_id})
+                    self.db_lock.release()
+                    if result <= 0:
+                        error_text = "ERROR", result, content, "when getting image", dev['image_id']
+                        self.logger.error("launch_server " + error_text)
+                        return -1, error_text
+                    if content[0]['metadata'] is not None:
+                        dev['metadata'] = json.loads(content[0]['metadata'])
+                    else:
+                        dev['metadata'] = {}
+
+                    if image_id in server_host_files:
+                        dev['source file'] = server_host_files[image_id]['source file'] #local path
+                        dev['file format'] = server_host_files[image_id]['file format'] # raw or qcow2
+                        continue
                 
             #2: copy image to host
-                remote_file = content[0]['path']
+                if image_id:
+                    remote_file = content[0]['path']
+                else:
+                    remote_file = empty_path
                 use_incremental_image = use_incremental
                 if dev['metadata'].get("use_incremental") == "no":
                     use_incremental_image = False

@@ -33,7 +33,7 @@ DBPORT="3306"
 DBNAME="vim_db"
 QUIET_MODE=""
 #TODO update it with the last database version
-LAST_DB_VERSION=19
+LAST_DB_VERSION=20
 
 # Detect paths
 MYSQL=$(which mysql)
@@ -187,6 +187,7 @@ fi
 #[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
 #[ $OPENVIM_VER_NUM -ge 5013 ] && DATABASE_TARGET_VER_NUM=18  #0.5.13  => 18
 #[ $OPENVIM_VER_NUM -ge 5015 ] && DATABASE_TARGET_VER_NUM=19  #0.5.15  => 19
+#[ $OPENVIM_VER_NUM -ge 5017 ] && DATABASE_TARGET_VER_NUM20   #0.5.17  => 20
 # TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -687,6 +688,20 @@ function downgrade_from_19(){
     echo "DELETE FROM schema_version WHERE version_int = '19';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
+function upgrade_to_20(){
+    echo "    Add 'image_size' to 'instance_devices'"
+    echo "ALTER TABLE instance_devices ADD COLUMN image_size INT NULL DEFAULT NULL AFTER dev;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (20, '0.20', '0.5.17', 'Add image_size to instance_devices', '2017-06-01');"\
+         | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+
+
+}
+
+function downgrade_from_20(){
+    echo "    Delete 'image_size' from 'instance_devices'"
+    echo "ALTER TABLE instance_devices DROP COLUMN image_size;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '20';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
 
 #TODO ... put funtions here
 

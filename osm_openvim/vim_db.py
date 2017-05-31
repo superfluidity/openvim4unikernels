@@ -1070,7 +1070,7 @@ class vim_db():
                     #get extended
                     extended = {}
                     #get devices
-                    cmd = "SELECT type, vpci, image_id, xml,dev FROM instance_devices WHERE instance_id = '%s' " %  str(instance_id)
+                    cmd = "SELECT type, vpci, image_id, xml, dev, image_size FROM instance_devices WHERE instance_id = '%s' " %  str(instance_id)
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)
                     if self.cur.rowcount > 0 :
@@ -1520,8 +1520,10 @@ class vim_db():
                             else:                    xml = 'Null'
                             if 'dev' in device: dev = "'" + device['dev'] + "'"
                             else:                    dev = 'Null'
-                            cmd = "INSERT INTO instance_devices (type, instance_id, image_id, vpci, xml, dev) VALUES ('%s','%s', %s, %s, %s, %s)" % \
-                                (device['type'], uuid, image_id, vpci, xml, dev)
+                            if 'image_size' in device: size = device['image_size']
+                            else:                    size = 0
+                            cmd = "INSERT INTO instance_devices (type, instance_id, image_id, vpci, xml, dev, image_size) VALUES ('%s','%s', %s, %s, %s, %s, %s)" % \
+                                (device['type'], uuid, image_id, vpci, xml, dev, str(size))
                             self.logger.debug(cmd)
                             self.cur.execute(cmd)
                     ##inserting new log

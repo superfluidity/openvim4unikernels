@@ -220,7 +220,8 @@ extended_schema={
                     "vpci":pci_schema,
                     "imageRef":id_schema,
                     "xml":xml_text_schema,
-                    "dev":nameshort_schema
+                    "dev":nameshort_schema,
+                    "size":integer1_schema,
                 },
                 "additionalProperties": False,
                 "required": ["type"]
