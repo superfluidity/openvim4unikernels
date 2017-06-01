@@ -518,7 +518,7 @@ class host_thread(threading.Thread):
         if topo == "oneSocket:hyperthreading":
             if vcpus % 2 != 0:
                 return -1, 'Cannot expose hyperthreading with an odd number of vcpus'
-            text += self.tab() + "<cpu mode='host-model'> <topology sockets='1' cores='%d' threads='2' /> </cpu>" % vcpus/2
+            text += self.tab() + "<cpu mode='host-model'> <topology sockets='1' cores='%d' threads='2' /> </cpu>" % (vcpus/2)
         elif windows_os or topo == "oneSocket":
             text += self.tab() + "<cpu mode='host-model'> <topology sockets='1' cores='%d' threads='1' /> </cpu>" % vcpus
         else:

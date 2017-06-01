@@ -146,7 +146,7 @@ metadata_schema={
         "os_type": {"type":"string"},
         "os_version": {"type":"string"},
         "bus": {"type":"string"},
-        "topology": {"type":"string", "enum": ["oneSocket"]}
+        "topology": {"type":"string", "enum": ["oneSocket", "oneSocket:hyperthreading"]}
     }
 }
 
