@@ -33,7 +33,7 @@ DBPORT="3306"
 DBNAME="vim_db"
 QUIET_MODE=""
 #TODO update it with the last database version
-LAST_DB_VERSION=20
+LAST_DB_VERSION=21
 
 # Detect paths
 MYSQL=$(which mysql)
@@ -187,7 +187,8 @@ fi
 #[ $OPENVIM_VER_NUM -ge 5010 ] && DATABASE_TARGET_VER_NUM=17  #0.5.10  => 17
 #[ $OPENVIM_VER_NUM -ge 5013 ] && DATABASE_TARGET_VER_NUM=18  #0.5.13  => 18
 #[ $OPENVIM_VER_NUM -ge 5015 ] && DATABASE_TARGET_VER_NUM=19  #0.5.15  => 19
-#[ $OPENVIM_VER_NUM -ge 5017 ] && DATABASE_TARGET_VER_NUM20   #0.5.17  => 20
+#[ $OPENVIM_VER_NUM -ge 5017 ] && DATABASE_TARGET_VER_NUM=20   #0.5.17  => 20
+#[ $OPENVIM_VER_NUM -ge 5018 ] && DATABASE_TARGET_VER_NUM=21   #0.5.18  => 21
 # TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -702,6 +703,22 @@ function downgrade_from_20(){
     echo "ALTER TABLE instance_devices DROP COLUMN image_size;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '20';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
+
+function upgrade_to_21(){
+    echo "    Add 'routes', 'links' and 'dns' to 'nets'"
+    echo "ALTER TABLE nets ADD COLUMN dns VARCHAR(255) NULL AFTER gateway_ip,
+    ADD COLUMN links TEXT(2000)  NULL AFTER dns,
+    ADD COLUMN routes TEXT(2000)  NULL AFTER links;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (21, '0.21', '0.5.18', 'Add routes, links and dns to inets', '2017-06-21');"\
+         | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_21(){
+    echo "    Delete 'routes', 'links' and 'dns' to 'nets'"
+    echo "ALTER TABLE nets DROP COLUMN dns, DROP COLUMN links, DROP COLUMN routes;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '21';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
 
 #TODO ... put funtions here
 

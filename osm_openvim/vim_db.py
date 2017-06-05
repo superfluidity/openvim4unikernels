@@ -1428,6 +1428,9 @@ class vim_db():
                             used_dhcp_ips = self._get_dhcp_ip_used_list(iface["net_id"])
                             iface["ip_address"] = self.get_free_ip_from_range(dhcp_first_ip, dhcp_last_ip,
                                                                               dhcp_cidr, used_dhcp_ips)
+                            del iface['links']
+                            del iface['dns']
+                            del iface['routes']
 
                         iface['uuid'] = str(myUuid.uuid1()) # create_uuid
                         cmd = "INSERT INTO uuids (uuid, root_uuid, used_at) VALUES ('%s','%s', 'ports')" % (iface['uuid'], uuid)
@@ -1443,6 +1446,7 @@ class vim_db():
                         else:
                             iface['mac'] = iface['mac_address']
                             del iface['mac_address']
+
                         #iface['mac']=iface.pop('mac_address', None)  #for leaving mac generation to libvirt
                         keys    = ",".join(iface.keys())
                         values  = ",".join( map(lambda x: "Null" if x is None else "'"+str(x)+"'", iface.values() ) )
@@ -1552,6 +1556,7 @@ class vim_db():
 
         ip_used_list.append(str(ips[1]))  # gw ip
         ip_used_list.append(str(ips[-1]))  # broadcast ip
+        ip_used_list.append(first_ip)
 
         for vm_ip in ips:
             if str(vm_ip) not in ip_used_list and IPAddress(first_ip) <= IPAddress(vm_ip) <= IPAddress(last_ip):

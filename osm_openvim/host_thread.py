@@ -813,16 +813,16 @@ class host_thread(threading.Thread):
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
         try:
-            net_namespace = 'ovim-' + str(vlan)
-            dhcp_path = os.path.join(dhcp_path, net_namespace)
+            dhcp_namespace = str(vlan) + '-dnsmasq'
+            dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
             pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
-            command = 'sudo ip netns exec ' + net_namespace + ' cat ' + pid_file
+            command = 'sudo ip netns exec ' + dhcp_namespace + ' cat ' + pid_file
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip netns exec ' + net_namespace + ' kill -9 ' + content
+            command = 'sudo ip netns exec ' + dhcp_namespace + ' kill -9 ' + content
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -944,7 +944,7 @@ class host_thread(threading.Thread):
             return True
         try:
             port_name = 'ovim-' + str(vlan)
-            command = 'sudo ip link set dev veth0-' + str(vlan) + ' down'
+            command = 'sudo ip link set dev ovim-' + str(vlan) + ' down'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             # content = stdout.read()
@@ -955,6 +955,59 @@ class host_thread(threading.Thread):
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
+            if len(content) == 0:
+                return True
+            else:
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("delete_linux_bridge ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
+            return False
+
+    def remove_link_bridge_to_ovs(self, vlan, link):
+        """
+        Delete a linux provider net connection to tenatn net
+        :param vlan: vlan port id
+        :param link: link name
+        :return: True if success
+        """
+
+        if self.test:
+            return True
+        try:
+            br_tap_name = str(vlan) + '-vethBO'
+            br_ovs_name = str(vlan) + '-vethOB'
+
+            # Delete ovs veth pair
+            command = 'sudo ip link set dev {} down'.format(br_ovs_name)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ovs-vsctl del-port br-int {}'.format(br_ovs_name)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # Delete br veth pair
+            command = 'sudo ip link set dev {} down'.format(br_tap_name)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # Delete br veth interface form bridge
+            command = 'sudo brctl delif {} {}'.format(link, br_tap_name)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # Delete br veth pair
+            command = 'sudo ip link set dev {} down'.format(link)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
             if len(content) == 0:
                 return True
             else:
@@ -1030,7 +1083,7 @@ class host_thread(threading.Thread):
                 self.ssh_connect()
             return False
 
-    def set_mac_dhcp_server(self, ip, mac, vlan, netmask, dhcp_path):
+    def set_mac_dhcp_server(self, ip, mac, vlan, netmask, first_ip, dhcp_path):
         """
         Write into dhcp conf file a rule to assigned a fixed ip given to an specific MAC address
         :param ip: IP address asigned to a VM
@@ -1044,21 +1097,43 @@ class host_thread(threading.Thread):
         if self.test:
             return True
 
-        net_namespace = 'ovim-' + str(vlan)
-        dhcp_path = os.path.join(dhcp_path, net_namespace)
-        dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
+        dhcp_namespace = str(vlan) + '-dnsmasq'
+        dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
+        dhcp_hostsdir = os.path.join(dhcp_path, dhcp_namespace)
 
         if not ip:
             return False
         try:
+
+            ns_interface = str(vlan) + '-vethDO'
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' cat /sys/class/net/{}/address'.format(ns_interface)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            iface_listen_mac = stdout.read()
+
+            if iface_listen_mac > 0:
+                command = 'sudo  ip netns exec ' + dhcp_namespace + ' cat {} | grep {}'.format(dhcp_hostsdir, dhcp_hostsdir)
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+                if content > 0:
+                    ip_data = iface_listen_mac.upper().replace('\n', '') + ',' + first_ip
+                    dhcp_hostsdir = os.path.join(dhcp_path, dhcp_namespace)
+
+                    command = 'sudo  ip netns exec ' + dhcp_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
+                    self.logger.debug("command: " + command)
+                    (_, stdout, _) = self.ssh_conn.exec_command(command)
+                    content = stdout.read()
+
+
             ip_data = mac.upper() + ',' + ip
 
-            command = 'sudo  ip netns exec ' + net_namespace + ' touch ' + dhcp_hostsdir
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' touch ' + dhcp_hostsdir
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo  ip netns exec ' + net_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
 
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -1088,16 +1163,16 @@ class host_thread(threading.Thread):
         if self.test:
             return False
         try:
-            net_namespace = 'ovim-' + str(vlan)
-            dhcp_path = os.path.join(dhcp_path, net_namespace)
-            dhcp_hostsdir = os.path.join(dhcp_path, net_namespace)
+            dhcp_namespace = str(vlan) + '-dnsmasq'
+            dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
+            dhcp_hostsdir = os.path.join(dhcp_path, dhcp_namespace)
 
             if not ip:
                 return False
 
             ip_data = mac.upper() + ',' + ip
 
-            command = 'sudo  ip netns exec ' + net_namespace + ' sudo sed -i \'/' + ip_data + '/d\' ' + dhcp_hostsdir
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' sudo sed -i \'/' + ip_data + '/d\' ' + dhcp_hostsdir
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1113,7 +1188,7 @@ class host_thread(threading.Thread):
                 self.ssh_connect()
             return False
 
-    def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path, gateway):
+    def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path, gateway, dns_list=None, routes=None):
         """
         Generate a linux bridge and attache the port to a OVS bridge
         :param self:
@@ -1122,30 +1197,34 @@ class host_thread(threading.Thread):
         :param netmask: network netmask
         :param dhcp_path: dhcp conf file path that live in namespace side
         :param gateway: Gateway address for dhcp net
+        :param dns_list: dns list for dhcp server
+        :param routes: routes list for dhcp server
         :return: True if success
         """
 
         if self.test:
             return True
         try:
-            interface = 'tap-' + str(vlan)
-            net_namespace = 'ovim-' + str(vlan)
-            dhcp_path = os.path.join(dhcp_path, net_namespace)
+            ns_interface = str(vlan) + '-vethDO'
+            dhcp_namespace = str(vlan) + '-dnsmasq'
+            dhcp_path = os.path.join(dhcp_path, dhcp_namespace, '')
             leases_path = os.path.join(dhcp_path, "dnsmasq.leases")
             pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
+
             dhcp_range = ip_range[0] + ',' + ip_range[1] + ',' + netmask
 
-            command = 'sudo ip netns exec ' + net_namespace + ' mkdir -p ' + dhcp_path
+            command = 'sudo ip netns exec ' + dhcp_namespace + ' mkdir -p ' + dhcp_path
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
             pid_path = os.path.join(dhcp_path, 'dnsmasq.pid')
-            command = 'sudo  ip netns exec ' + net_namespace + ' cat ' + pid_path
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' cat ' + pid_path
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
+
             # check if pid is runing
             pid_status_path = content
             if content:
@@ -1153,11 +1232,34 @@ class host_thread(threading.Thread):
                 self.logger.debug("command: " + command)
                 (_, stdout, _) = self.ssh_conn.exec_command(command)
                 content = stdout.read()
+
+            gateway_option = ' --dhcp-option=3,' + gateway
+
+            dhcp_route_option = ''
+            if routes:
+                dhcp_route_option = ' --dhcp-option=121'
+                for key, value in routes.iteritems():
+                        if 'default' == key:
+                            gateway_option = ' --dhcp-option=3,' + value
+                        else:
+                            dhcp_route_option += ',' + key + ',' + value
+            dns_data = ''
+            if dns_list:
+                dns_data = ' --dhcp-option=6'
+                for dns in dns_list:
+                    dns_data += ',' + dns
+
             if not content:
-                command = 'sudo  ip netns exec ' + net_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
-                  '--interface=' + interface + ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
-                  ' --dhcp-range ' + dhcp_range + ' --pid-file=' + pid_file + ' --dhcp-leasefile=' + leases_path + \
-                  '  --listen-address ' + gateway
+                command = 'sudo  ip netns exec ' + dhcp_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
+                          '--interface=' + ns_interface + \
+                          ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
+                          ' --dhcp-range ' + dhcp_range + \
+                          ' --pid-file=' + pid_file + \
+                          ' --dhcp-leasefile=' + leases_path + \
+                          ' --listen-address ' + ip_range[0] + \
+                          gateway_option + \
+                          dhcp_route_option + \
+                          dns_data
 
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
@@ -1183,21 +1285,35 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            net_namespace = 'ovim-' + str(vlan)
-            command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + str(vlan)
+            br_veth_name = str(vlan) + '-vethDO'
+            ovs_veth_name = str(vlan) + '-vethOD'
+            dhcp_namespace = str(vlan) + '-dnsmasq'
+
+            command = 'sudo ovs-vsctl del-port br-int ' + ovs_veth_name
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + str(vlan) + ' down'
+            command = 'sudo ip netns exec ' + dhcp_namespace + ' ip link set dev ' + br_veth_name + ' down'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link set dev ovs-tap-' + str(vlan) + ' down'
+            command = 'sudo ip link set dev ' + dhcp_namespace + ' down'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
+
+            command = 'sudo brctl delbr ' + dhcp_namespace
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            command = 'sudo ip netns del ' + dhcp_namespace
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
         except paramiko.ssh_exception.SSHException as e:
             self.logger.error("delete_dhcp_interfaces ssh Exception: " + str(e))
             if "SSH session not active" in str(e):
@@ -1216,50 +1332,50 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            net_namespace = 'ovim-' + str(vlan)
-            namespace_interface = 'tap-' + str(vlan)
+            ovs_veth_name = str(vlan) + '-vethOD'
+            ns_veth = str(vlan) + '-vethDO'
+            dhcp_namespace = str(vlan) + '-dnsmasq'
 
-            command = 'sudo ip netns add ' + net_namespace
+            command = 'sudo ip netns add ' + dhcp_namespace
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link add tap-' + str(vlan) + ' type veth peer name ovs-tap-' + str(vlan)
+            command = 'sudo ip link add ' + ns_veth + ' type veth peer name ' + ovs_veth_name
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + str(vlan) + ' tag=' + str(vlan)
+            command = 'sudo ip link set ' + ns_veth + ' netns ' + dhcp_namespace
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link set tap-' + str(vlan) + ' netns ' + net_namespace
+            command = 'sudo ip netns exec ' + dhcp_namespace + ' ip link set dev ' + ns_veth + ' up'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev tap-' + str(vlan) + ' up'
+            command = 'sudo ovs-vsctl add-port br-int ' + ovs_veth_name + ' tag=' + str(vlan)
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip link set dev ovs-tap-' + str(vlan) + ' up'
+            command = 'sudo ip link set dev ' + ovs_veth_name + ' up'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ip netns exec ' + net_namespace + ' ip link set dev lo up'
+            command = 'sudo ip netns exec ' + dhcp_namespace + ' ip link set dev lo up'
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo  ip netns exec ' + net_namespace + ' ' + ' ifconfig  ' + namespace_interface \
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' ' + ' ifconfig  ' + ns_veth \
                       + ' ' + ip_listen_address + ' netmask ' + netmask
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
-
             if len(content) == 0:
                 return True
             else:
@@ -1270,6 +1386,266 @@ class host_thread(threading.Thread):
                 self.ssh_connect()
             return False
 
+    def delete_qrouter_connection(self, vlan, link):
+        """
+        Delete qrouter Namesapce with all veth interfaces need it
+        :param vlan: 
+        :param link: 
+        :return: 
+        """
+
+        ns_qouter = str(vlan) + '-qrouter'
+        qrouter_ovs_veth = str(vlan) + '-vethOQ'
+        qrouter_ns_veth = str(vlan) + '-vethQO'
+
+        qrouter_br_veth = str(vlan) + '-vethBQ'
+        qrouter_ns_router_veth = str(vlan) + '-vethQB'
+
+        # delete ovs veth to ovs br-int
+        command = 'sudo ovs-vsctl del-port br-int {}'.format(qrouter_ovs_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # down ns veth
+        command = 'sudo ip netns exec {} ip link set dev {} down'.format(ns_qouter, qrouter_ns_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # down ovs veth interface
+        command = 'sudo ip link set dev {} down'.format(qrouter_br_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # down br veth interface
+        command = 'sudo ip link set dev {} down'.format(qrouter_ovs_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # down br veth interface
+        command = 'sudo ip link set dev {} down'.format(qrouter_ns_router_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # down br veth interface
+        command = 'sudo brctl delif {} {}'.format(link, qrouter_br_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+
+        # delete NS
+        command = 'sudo ip netns del ' + ns_qouter
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+    def create_qrouter_ovs_connection(self, vlan, gateway, dhcp_cidr):
+        """
+        Create qrouter Namesapce with all veth interfaces need it between NS and OVS
+        :param vlan: 
+        :param gateway: 
+        :return: 
+        """
+
+        ns_qouter = str(vlan) + '-qrouter'
+        qrouter_ovs_veth = str(vlan) + '-vethOQ'
+        qrouter_ns_veth = str(vlan) + '-vethQO'
+
+        # Create NS
+        command = 'sudo ip netns add ' + ns_qouter
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # Create pait veth
+        command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_ns_veth, qrouter_ovs_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # up ovs veth interface
+        command = 'sudo ip link set dev {} up'.format(qrouter_ovs_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # add ovs veth to ovs br-int
+        command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(qrouter_ovs_veth, vlan)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # add veth to ns
+        command = 'sudo ip link set {} netns {}'.format(qrouter_ns_veth, ns_qouter)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # up ns loopback
+        command = 'sudo ip netns exec {} ip link set dev lo up'.format(ns_qouter)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # up ns veth
+        command = 'sudo ip netns exec {} ip link set dev {} up'.format(ns_qouter, qrouter_ns_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        from netaddr import IPNetwork
+        ip_tools = IPNetwork(dhcp_cidr)
+        cidr_len = ip_tools.prefixlen
+
+        # set gw to ns veth
+        command = 'sudo ip netns exec {} ip address add {}/{} dev {}'.format(ns_qouter, gateway, cidr_len, qrouter_ns_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+    def add_ns_routes(self, vlan, routes):
+
+        for key, value in routes.iteritems():
+            ns_qouter = str(vlan) + '-qrouter'
+            qrouter_ns_router_veth = str(vlan) + '-vethQB'
+            # up ns veth
+            if key == 'default':
+                command = 'sudo ip netns exec {} ip route add {} via {} '.format(ns_qouter,  key, value)
+            else:
+                command = 'sudo ip netns exec {} ip route add {} via {} dev {}'.format(ns_qouter, key, value,
+                                                                                       qrouter_ns_router_veth)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+    def create_qrouter_br_connection(self, vlan, cidr, link):
+        """
+        Create veth interfaces between user bridge (link) and OVS
+        :param vlan: 
+        :param link: 
+        :return: 
+        """
+
+        ns_qouter = str(vlan) + '-qrouter'
+        qrouter_ns_router_veth = str(vlan) + '-vethQB'
+        qrouter_br_veth = str(vlan) + '-vethBQ'
+
+        # Create pait veth
+        command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_br_veth, qrouter_ns_router_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # up ovs veth interface
+        command = 'sudo ip link set dev {} up'.format(qrouter_br_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # add veth to ns
+        command = 'sudo ip link set {} netns {}'.format(qrouter_ns_router_veth, ns_qouter)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        # up ns veth
+        command = 'sudo ip netns exec {} ip link set dev {} up'.format(ns_qouter, qrouter_ns_router_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo ip netns exec {} ip address add {} dev {}'.format(ns_qouter, link['nat'], qrouter_ns_router_veth)
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        command = 'sudo brctl show | grep {}'.format(link['iface'])
+        self.logger.debug("command: " + command)
+        (_, stdout, _) = self.ssh_conn.exec_command(command)
+        content = stdout.read()
+
+        if content > '':
+            # up ns veth
+            command = 'sudo brctl addif {} {}'.format(link['iface'], qrouter_br_veth)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            # up ns veth
+            command = 'sudo ip netns exec {} iptables -t nat -A POSTROUTING -o {} -s {} -d {} -j MASQUERADE' \
+                .format(ns_qouter, qrouter_ns_router_veth, link['nat'], cidr)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+
+        else:
+            self.logger.error('Bridge {} given by user not exist'.format(qrouter_br_veth))
+
+
+
+    def create_link_bridge_to_ovs(self, vlan, link):
+        """
+        Create interfaces to connect a linux bridge with tenant net
+        :param vlan: segmentation id
+        :return: True if success
+        """
+        if self.test:
+            return True
+        try:
+
+            br_tap_name = str(vlan) + '-vethBO'
+            br_ovs_name = str(vlan) + '-vethOB'
+
+            # is a bridge or a interface
+            command = 'sudo brctl show | grep {}'.format(link)
+            self.logger.debug("command: " + command)
+            (_, stdout, _) = self.ssh_conn.exec_command(command)
+            content = stdout.read()
+
+            if content > '':
+                command = 'sudo ip link add {} type veth peer name {}'.format(br_tap_name, br_ovs_name)
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+
+                command = 'sudo ip link set dev {}  up'.format(br_tap_name)
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+
+                command = 'sudo ip link set dev {}  up'.format(br_ovs_name)
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+
+                command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(br_ovs_name, str(vlan))
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+
+                command = 'sudo brctl addif ' + link + ' {}'.format(br_tap_name)
+                self.logger.debug("command: " + command)
+                (_, stdout, _) = self.ssh_conn.exec_command(command)
+                content = stdout.read()
+
+                if len(content) == 0:
+                    return True
+                else:
+                    return False
+            else:
+                self.logger.error('Link is not present, please check {}'.format(link))
+                return False
+        except paramiko.ssh_exception.SSHException as e:
+            self.logger.error("create_dhcp_interfaces ssh Exception: " + str(e))
+            if "SSH session not active" in str(e):
+                self.ssh_connect()
+            return False
 
     def create_ovs_vxlan_tunnel(self, vxlan_interface, remote_ip):
         """
@@ -2344,8 +2720,8 @@ def create_server(server, db, db_lock, only_of_ports):
         #Get the brifge name
         db_lock.acquire()
         result, content = db.get_table(FROM='nets',
-                                       SELECT=('name', 'type', 'vlan', 'provider', 'enable_dhcp',
-                                                 'dhcp_first_ip', 'dhcp_last_ip', 'cidr'),
+                                       SELECT=('name', 'type', 'vlan', 'provider', 'enable_dhcp','dhcp_first_ip',
+                                               'dhcp_last_ip', 'cidr', 'gateway_ip', 'dns', 'links', 'routes'),
                                        WHERE={'uuid': control_iface['net_id']})
         db_lock.release()
         if result < 0: 
@@ -2370,6 +2746,13 @@ def create_server(server, db, db_lock, only_of_ports):
                     control_iface["dhcp_first_ip"] = network["dhcp_first_ip"]
                     control_iface["dhcp_last_ip"] = network["dhcp_last_ip"]
                     control_iface["cidr"] = network["cidr"]
+
+                if network.get("dns"):
+                    control_iface["dns"] = yaml.safe_load(network.get("dns"))
+                if network.get("links"):
+                    control_iface["links"] = yaml.safe_load(network.get("links"))
+                if network.get("routes"):
+                    control_iface["routes"] = yaml.safe_load(network.get("routes"))
             else:
                 if network['type']!='data' and network['type']!='ptp':
                     return -1, "Error at field netwoks: network uuid %s for dataplane interface is not of type data or ptp" % control_iface['net_id']

@@ -603,10 +603,26 @@ network_new_schema = {
                 "enable_dhcp": {"type": "boolean"},
                 "dhcp_first_ip": ip_schema,
                 "dhcp_last_ip": ip_schema,
+                "dns": {"type": "array", "items": [ip_schema]},
+                "links":    {"type": "array", "items": {"type": "object", "properties": {
+                                "nat": cidr_schema,
+                                "iface": name_schema,
+                                "vlan": vlan_schema},
+                                "required": ["iface"],
+                                "additionalProperties": False
+                                },
+
+                             },
+                "routes":   {"type": "object", "properties":  {"default": ip_schema}, "patternProperties": {
+                                                            "^([0-9]{1,3}.){3}[0-9]{1,3}/[0-9]{1,2}$": ip_schema,
+                                                            },
+                                                            "additionalProperties": False
+                             },
+
                 "bind_net": name_schema,   # can be name, or uuid
                 "bind_type": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^vlan:[0-9]{1,4}$"}]}
             },
-            "required": ["name"]
+        "required": ["name"]
         }
     },
     "required": ["network"],

@@ -157,15 +157,25 @@ http2db_network={'id':'uuid','provider:vlan':'vlan', 'provider:physical': 'provi
 http2db_ofc = {'id': 'uuid'}
 http2db_port={'id':'uuid', 'network_id':'net_id', 'mac_address':'mac', 'device_owner':'type','device_id':'instance_id','binding:switch_port':'switch_port','binding:vlan':'vlan', 'bandwidth':'Mbps'}
 
+
 def remove_extra_items(data, schema):
+    import re
+
     deleted=[]
     if type(data) is tuple or type(data) is list:
         for d in data:
             a= remove_extra_items(d, schema['items'])
             if a is not None: deleted.append(a)
     elif type(data) is dict:
+
         for k in data.keys():
-            if 'properties' not in schema or k not in schema['properties'].keys():
+            if 'patternProperties' in schema and k not in schema['properties'].keys():
+                reg_ex_list = schema['patternProperties'].keys()
+                for reg_ex in reg_ex_list:
+                    if not re.match(reg_ex, k):
+                        del data[k]
+                        deleted.append(k)
+            elif 'properties' not in schema or k not in schema['properties'].keys(): # or k not in schema['patternProperties'].keys():
                 del data[k]
                 deleted.append(k)
             else:
@@ -174,7 +184,8 @@ def remove_extra_items(data, schema):
     if len(deleted) == 0: return None
     elif len(deleted) == 1: return deleted[0]
     else: return deleted
-                
+
+
 def delete_nulls(var):
     if type(var) is dict:
         for k in var.keys():
@@ -648,7 +659,7 @@ def http_post_hosts():
                 # create bridge
                 create_dhcp_ovs_bridge()
                 config_dic['host_threads'][content['uuid']].insert_task("new-ovsbridge")
-                # check if more host exist
+                # create vlxan bwt OVS controller and computes
                 create_vxlan_mesh(content['uuid'])
 
         # return host data
@@ -674,8 +685,8 @@ def delete_dhcp_ovs_bridge(vlan, net_uuid):
     http_controller = config_dic['http_threads'][threading.current_thread().name]
     dhcp_controller = http_controller.ovim.get_dhcp_controller()
 
-    dhcp_controller.delete_dhcp_port(vlan, net_uuid)
     dhcp_controller.delete_dhcp_server(vlan, net_uuid, dhcp_path)
+    dhcp_controller.delete_dhcp_port(vlan, net_uuid)
 
 
 def create_dhcp_ovs_bridge():
@@ -713,7 +724,7 @@ def set_mac_dhcp(vm_ip, vlan, first_ip, last_ip, cidr, mac):
     http_controller = config_dic['http_threads'][threading.current_thread().name]
     dhcp_controller = http_controller.ovim.get_dhcp_controller()
 
-    dhcp_controller.set_mac_dhcp_server(vm_ip, mac, vlan, dhcp_netmask, dhcp_path)
+    dhcp_controller.set_mac_dhcp_server(vm_ip, mac, vlan, dhcp_netmask, first_ip, dhcp_path)
 
 
 def delete_mac_dhcp(vm_ip, vlan, mac):
@@ -1614,7 +1625,7 @@ def http_post_server_id(tenant_id):
             if net['type'] == 'instance:ovs':
                 dhcp_nets_id.append(get_network_id(net['net_id']))
 
-        ports_to_free=[]
+        ports_to_free = []
         new_instance_result, new_instance = my.db.new_instance(content, nets, ports_to_free)
         if new_instance_result < 0:
             print "Error http_post_servers() :", new_instance_result, new_instance
@@ -1623,6 +1634,8 @@ def http_post_server_id(tenant_id):
         print
         print "inserted at DB"
         print
+
+
         for port in ports_to_free:
             r,c = config_dic['host_threads'][ server['host_id'] ].insert_task( 'restore-iface',*port )
             if r < 0:
@@ -1652,14 +1665,24 @@ def http_post_server_id(tenant_id):
                         dhcp_enable = bool(server_net['network']['enable_dhcp'])
                         vm_dhcp_ip = c2[0]["ip_address"]
                         config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
+
+                        dns = yaml.safe_load(server_net['network'].get("dns"))
+                        routes = yaml.safe_load(server_net['network'].get("routes"))
+                        links = yaml.safe_load(server_net['network'].get("links"))
                         if dhcp_enable:
                             dhcp_firt_ip = str(server_net['network']['dhcp_first_ip'])
                             dhcp_last_ip = str(server_net['network']['dhcp_last_ip'])
                             dhcp_cidr = str(server_net['network']['cidr'])
                             gateway = str(server_net['network']['gateway_ip'])
-                            set_mac_dhcp(vm_dhcp_ip, vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, c2[0]['mac'])
+
                             http_controller = config_dic['http_threads'][threading.current_thread().name]
-                            http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, gateway)
+                            http_controller.ovim.launch_dhcp_server(vlan, dhcp_firt_ip, dhcp_last_ip,
+                                                                    dhcp_cidr, gateway, dns, routes)
+                            set_mac_dhcp(vm_dhcp_ip, vlan, dhcp_firt_ip, dhcp_last_ip, dhcp_cidr, c2[0]['mac'])
+
+                        if links:
+                            http_controller.ovim.launch_link_bridge_to_ovs(vlan, gateway, dhcp_cidr, links, routes)
+
 
         #Start server
         server['uuid'] = new_instance
@@ -1678,6 +1701,7 @@ def http_post_server_id(tenant_id):
     else:
         bottle.abort(HTTP_Bad_Request, content)
         return
+
 
 def http_server_action(server_id, tenant_id, action):
     '''Perform actions over a server as resume, reboot, terminate, ...'''
@@ -1830,14 +1854,22 @@ def http_server_action(server_id, tenant_id, action):
                     #print "dhcp insert del task"
                     if r < 0:
                         print ':http_post_servers ERROR UPDATING dhcp_server !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!' +  c 
-        # delete ovs-port and linux bridge, contains a list of tuple (net_id,vlan)
+        # delete ovs-port and linux bridge, contains a list of tuple (net_id,vlan, vm_ip, mac)
+
         for net in net_ovs_list:
             mac = str(net[3])
             vm_ip = str(net[2])
             vlan = str(net[1])
             net_id = net[0]
+
             delete_dhcp_ovs_bridge(vlan, net_id)
             delete_mac_dhcp(vm_ip, vlan, mac)
+
+            net_data = my.ovim.show_network(net_id)
+            if net_data.get('links'):
+                links = yaml.load(net_data.get('links'))
+                my.ovim.delete_link_bridge_to_ovs(vlan, links)
+
             config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, net_id)
     if warn_text:
         data["result"] += warn_text
@@ -1956,7 +1988,7 @@ def http_post_networks():
 
     try:
         # parse input data
-        http_content = format_in(network_new_schema )
+        http_content = format_in(network_new_schema)
         r = remove_extra_items(http_content, network_new_schema)
         if r is not None:
             print "http_post_networks: Warning: remove extra items ", r

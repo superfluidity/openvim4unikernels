@@ -28,6 +28,7 @@ Two thread will be launched, with normal and administrative permissions.
 """
 
 import threading
+import yaml
 import vim_db
 import logging
 # import imp
@@ -42,9 +43,9 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.17-r533"
+__version__ = "0.5.18-r534"
 version_date = "Jun 2017"
-database_version = 20      #needed database schema version
+database_version = 21      #needed database schema version
 
 HTTP_Bad_Request =          400
 HTTP_Unauthorized =         401
@@ -146,7 +147,7 @@ class ovim():
             if "dhcp_last_ip" not in network:
                 network["dhcp_last_ip"] = str(ips[-2])
             if "gateway_ip" not in network:
-                network["gateway_ip"] = str(ips[2])
+                network["gateway_ip"] = str(ips[1])
 
             return True
         else:
@@ -285,11 +286,16 @@ class ovim():
             if (net_type == 'bridge_data' or net_type == 'bridge_man') and \
                     net["provider"][:4] == 'OVS:' and net["enable_dhcp"] == "true":
                 try:
-                    self.launch_dhcp_server(net['vlan'],
-                                            net['dhcp_first_ip'],
-                                            net['dhcp_last_ip'],
-                                            net['cidr'],
-                                            net['gateway_ip'])
+                    routes = yaml.safe_load(net.get('routes'))
+                    dns = yaml.safe_load(net.get('dns'))
+                    self.launch_dhcp_server(net.get('vlan'),
+                                            net.get('dhcp_first_ip'),
+                                            net.get('dhcp_last_ip'),
+                                            net.get('cidr'),
+                                            net.get('gateway_ip'),
+                                            dns,
+                                            routes)
+                    self.launch_link_bridge_to_ovs(net['vlan'], net.get('links'), net.get('routes'))
                 except Exception as e:
                     self.logger.error("Fail at launching dhcp server for net_id='%s' net_name='%s': %s",
                                       net["uuid"], net["name"], str(e))
@@ -640,6 +646,13 @@ class ovim():
         dhcp_integrity = True
         if 'enable_dhcp' in network and network['enable_dhcp']:
             dhcp_integrity = self._check_dhcp_data_integrity(network)
+        
+        if network.get('links'):
+            network['links'] = yaml.safe_dump(network['links'], default_flow_style=True, width=256)
+        if network.get('dns'):
+            network['dns'] = yaml.safe_dump(network['dns'], default_flow_style=True, width=256)
+        if network.get('routes'):
+            network['routes'] = yaml.safe_dump(network['routes'], default_flow_style=True, width=256)
 
         result, content = self.db.new_row('nets', network, True, True)
 
@@ -1392,7 +1405,7 @@ class ovim():
 
         return dhcp_host
 
-    def launch_dhcp_server(self, vlan, first_ip, last_ip, cidr, gateway):
+    def launch_dhcp_server(self, vlan, first_ip, last_ip, cidr, gateway, dns, routes):
         """
         Launch a dhcpserver base on dnsmasq attached to the net base on vlan id across the the openvim computes
         :param vlan: vlan identifier
@@ -1409,9 +1422,49 @@ class ovim():
         dhcp_path = self.config['ovs_controller_file_path']
 
         controller_host = self.get_dhcp_controller()
-        controller_host.create_linux_bridge(vlan)
-        controller_host.create_dhcp_interfaces(vlan, gateway, dhcp_netmask)
-        controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path, gateway)
+        # TODO leo check if is need ti to create an ovim-vlan bridge, looks like not
+        # controller_host.create_linux_bridge(vlan)
+        controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
+        dhcp_path = self.config['ovs_controller_file_path']
+        controller_host.launch_dhcp_server(vlan, ip_range, dhcp_netmask, dhcp_path, gateway, dns, routes)
+
+    def launch_link_bridge_to_ovs(self, vlan, gateway, dhcp_cidr, links=None, routes=None):
+        """
+        Launch creating of connections (veth) between user bridge (link) and OVS
+        :param vlan: 
+        :param gateway: 
+        :param links: 
+        :return: 
+        """
+
+        if links:
+            controller_host = self.get_dhcp_controller()
+            for link in links:
+                if 'iface' in link and 'nat' not in link:
+                        controller_host.create_link_bridge_to_ovs(vlan, link['iface'])
+                elif 'nat' in link:
+                    controller_host.create_qrouter_ovs_connection(vlan, gateway, dhcp_cidr)
+                    controller_host.create_qrouter_br_connection(vlan, dhcp_cidr, link)
+
+            if len(routes):
+                controller_host.add_ns_routes(vlan, routes)
+
+    def delete_link_bridge_to_ovs(self, vlan,  links=None):
+        """
+        Delete connections (veth) between user bridge (link) and OVS
+        :param vlan: 
+        :param links: 
+        :return: 
+        """
+        if links:
+            controller_host = self.get_dhcp_controller()
+
+            for link in links:
+                if 'iface' in link and 'nat' not in link:
+                    controller_host.remove_link_bridge_to_ovs(vlan, link['iface'])
+                elif 'nat' in link:
+                    controller_host.delete_qrouter_connection(vlan,  link['iface'])
+
 
 if __name__ == "__main__":
 
