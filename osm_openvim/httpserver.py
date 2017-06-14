@@ -640,8 +640,9 @@ def http_post_hosts():
                                     test=host_test_mode, image_path=config_dic['host_image_path'],
                                     version=config_dic['version'], host_id=content['uuid'],
                                     develop_mode=host_develop_mode, develop_bridge_iface=host_develop_bridge_iface)
+
             thread.start()
-            config_dic['host_threads'][ content['uuid'] ] = thread
+            config_dic['host_threads'][content['uuid']] = thread
 
             if config_dic['network_type'] == 'ovs':
                 # create bridge
@@ -650,7 +651,7 @@ def http_post_hosts():
                 # check if more host exist
                 create_vxlan_mesh(content['uuid'])
 
-        #return host data
+        # return host data
         change_keys_http2db(content, http2db_host, reverse=True)
         if len(warning_text)>0:
             content["warning"]= warning_text

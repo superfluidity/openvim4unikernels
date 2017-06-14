@@ -101,6 +101,7 @@ class host_thread(threading.Thread):
         self.queueLock = threading.Lock()
         self.taskQueue = Queue.Queue(2000)
         self.ssh_conn = None
+        self.connectivity = True
         self.lvirt_conn_uri = "qemu+ssh://{user}@{host}/system?no_tty=1&no_verify=1".format(
             user=self.user, host=self.host)
         if keyfile:
@@ -117,6 +118,28 @@ class host_thread(threading.Thread):
         except paramiko.ssh_exception.SSHException as e:
             text = e.args[0]
             self.logger.error("ssh_connect ssh Exception: " + text)
+
+    def check_connectivity(self):
+        if not self.test:
+
+            try:
+                if not self.ssh_conn:
+                    self.ssh_connect()
+
+                command = 'sudo brctl show'
+                (_, stdout, stderr) = self.ssh_conn.exec_command(command, timeout=10)
+                content = stderr.read()
+                if len(content) > 0:
+                    self.connectivity = False
+                    self.logger.error("ssh conection error")
+            except paramiko.ssh_exception.SSHException as e:
+                text = e.args[0]
+                self.connectivity = False
+                self.logger.error("ssh_connect ssh Exception: " + text)
+                raise paramiko.ssh_exception.SSHException("ssh error conection")
+            except Exception as e:
+                self.connectivity = False
+                raise paramiko.ssh_exception.SSHException("ssh error conection")
 
     def load_localinfo(self):
         if not self.test:
@@ -732,8 +755,10 @@ class host_thread(threading.Thread):
         Create a bridge in compute OVS to allocate VMs
         :return: True if success
         """
-        if self.test:
+        if self.test or not self.connectivity:
             return True
+
+
         try:
             command = 'sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true'
             self.logger.debug("command: " + command)
@@ -757,7 +782,7 @@ class host_thread(threading.Thread):
         :return:
         """
 
-        if self.test:
+        if self.test or not self.connectivity:
             return True
         try:
             port_name = 'ovim-' + str(vlan)
@@ -783,7 +808,7 @@ class host_thread(threading.Thread):
         :param dhcp_path: conf fiel path that live in namespace side
         :return:
         """
-        if self.test:
+        if self.test or not self.connectivity:
             return True
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
@@ -1253,7 +1278,7 @@ class host_thread(threading.Thread):
         :param remote_ip: tunnel endpoint remote compute ip.
         :return:
         """
-        if self.test:
+        if self.test or not self.connectivity:
             return True
         try:
             command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
@@ -1279,7 +1304,7 @@ class host_thread(threading.Thread):
         :param vxlan_interface: vlxan name to be delete it.
         :return: True if success.
         """
-        if self.test:
+        if self.test or not self.connectivity:
             return True
         try:
             command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
@@ -1302,7 +1327,7 @@ class host_thread(threading.Thread):
         Delete a OVS bridge from  a compute.
         :return: True if success
         """
-        if self.test:
+        if self.test or not self.connectivity:
             return True
         try:
             command = 'sudo ovs-vsctl del-br br-int'

@@ -231,10 +231,22 @@ if __name__ == "__main__":
             logger.error(error_msg)
             exit(1)
 
+        if config_dic['network_type'] == 'ovs' \
+                and config_dic['ovs_controller_ip'] == 'localhost' \
+                and not (config_dic['mode'] == 'test' or config_dic['mode'] == "OF only"):
+
+            error_msg = "Error: invalid value '{}' for ovs_controller_ip at {}. " \
+                        "Use a valid IP address".format(config_dic['ovs_controller_ip'], config_file)
+
+            print ("!! {} ".format(error_msg))
+            logger.error(error_msg)
+            exit(1)
+
         if config_dic['mode'] != 'normal':
             print ('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
             print ("!! Warning, openvimd in TEST mode '{}'".format(config_dic['mode']))
             print ('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+
         config_dic['version'] = ovim.ovim.get_version()
         config_dic["logger_name"] = "openvim"
 

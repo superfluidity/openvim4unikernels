@@ -191,6 +191,40 @@ class ovim():
         self.config["db_lock"] = threading.Lock()
 
         self.of_test_mode = False if self.config['mode'] == 'normal' or self.config['mode'] == "OF only" else True
+
+        # Create one thread for each host
+        host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
+        host_develop_mode = True if self.config['mode'] == 'development' else False
+        host_develop_bridge_iface = self.config.get('development_bridge', None)
+
+        # get host list from data base before starting threads
+        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid', 'password', 'keyfile'),
+                                     FROM='hosts', WHERE={'status': 'ok'})
+        if r < 0:
+            raise ovimException("Cannot get hosts from database {}".format(hosts))
+
+        self.config['host_threads'] = {}
+
+        for host in hosts:
+            thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=self.config["db"],
+                                    password=host['password'],
+                                    keyfile=host.get('keyfile', self.config["host_ssh_keyfile"]),
+                                    db_lock=self.config["db_lock"], test=host_test_mode,
+                                    image_path=self.config['host_image_path'],
+                                    version=self.config['version'], host_id=host['uuid'],
+                                    develop_mode=host_develop_mode,
+                                    develop_bridge_iface=host_develop_bridge_iface,
+                                    logger_name=self.logger_name + ".host." + host['name'],
+                                    debug=self.config.get('log_level_host'))
+
+            try:
+                thread.check_connectivity()
+            except Exception as e:
+                self.logger.critical('Error detected for compute = {} with ip = {}'
+                                     .format(host['name'], host['ip_name']))
+
+            self.config['host_threads'][host['uuid']] = thread
+
         # precreate interfaces; [bridge:<host_bridge_name>, VLAN used at Host, uuid of network camping in this bridge,
         # speed in Gbit/s
 
@@ -238,31 +272,7 @@ class ovim():
             thread.start()
             self.config['dhcp_thread'] = thread
 
-        # Create one thread for each host
-        host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
-        host_develop_mode = True if self.config['mode'] == 'development' else False
-        host_develop_bridge_iface = self.config.get('development_bridge', None)
 
-        # get host list from data base before starting threads
-        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid', 'password', 'keyfile'),
-                                     FROM='hosts', WHERE={'status': 'ok'})
-        if r < 0:
-            raise ovimException("Cannot get hosts from database {}".format(hosts))
-
-        self.config['host_threads'] = {}
-        for host in hosts:
-            thread = ht.host_thread(name=host['name'], user=host['user'], host=host['ip_name'], db=self.config["db"],
-                                    password=host['password'],
-                                    keyfile=host.get('keyfile', self.config["host_ssh_keyfile"]),
-                                    db_lock=self.config["db_lock"], test=host_test_mode,
-                                    image_path=self.config['host_image_path'],
-                                    version=self.config['version'], host_id=host['uuid'],
-                                    develop_mode=host_develop_mode,
-                                    develop_bridge_iface=host_develop_bridge_iface,
-                                    logger_name=self.logger_name + ".host." + host['name'],
-                                    debug=self.config.get('log_level_host'))
-            thread.start()
-            self.config['host_threads'][host['uuid']] = thread
 
         # create ovs dhcp thread
         result, content = self.db.get_table(FROM='nets')
@@ -1375,8 +1385,11 @@ class ovim():
                                    debug=self.config.get('log_level_host'))
         # dhcp_host.start()
         self.config['host_threads']['openvim_controller'] = dhcp_host
-        if not host_test_mode:
-            dhcp_host.ssh_connect()
+        try:
+            dhcp_host.check_connectivity()
+        except Exception as e:
+           pass
+
         return dhcp_host
 
     def launch_dhcp_server(self, vlan, first_ip, last_ip, cidr, gateway):
