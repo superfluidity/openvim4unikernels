@@ -222,7 +222,7 @@ class ovim():
             except Exception as e:
                 self.logger.critical('Error detected for compute = {} with ip = {}'
                                      .format(host['name'], host['ip_name']))
-
+            thread.start()
             self.config['host_threads'][host['uuid']] = thread
 
         # precreate interfaces; [bridge:<host_bridge_name>, VLAN used at Host, uuid of network camping in this bridge,
