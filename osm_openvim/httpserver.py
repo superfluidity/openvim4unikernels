@@ -38,6 +38,7 @@ import datetime
 import hashlib
 import os
 import imp
+import socket
 from netaddr import IPNetwork, IPAddress, all_matching_cidrs
 #import only if needed because not needed in test mode. To allow an easier installation   import RADclass
 from jsonschema import validate as js_v, exceptions as js_e
@@ -637,6 +638,11 @@ def http_post_hosts():
     for numa in host.get("numas", ()):
         if "hugepages_consumed" in numa:
             del numa["hugepages_consumed"]
+        for core in numa.get("cores", ()):
+            if "instance_id" in core:
+                del core["instance_id"]
+            if "v_thread_id" in core:
+                del core["v_thread_id"]
     result, content = my.db.new_host(host)
     if result >= 0:
         if content['admin_state_up']:
@@ -660,7 +666,7 @@ def http_post_hosts():
                 create_dhcp_ovs_bridge()
                 config_dic['host_threads'][content['uuid']].insert_task("new-ovsbridge")
                 # create vlxan bwt OVS controller and computes
-                create_vxlan_mesh(content['uuid'])
+                create_vxlan_mesh(content['uuid'], my.logger)
 
         # return host data
         change_keys_http2db(content, http2db_host, reverse=True)
@@ -744,12 +750,12 @@ def delete_mac_dhcp(vm_ip, vlan, mac):
     dhcp_controller.delete_mac_dhcp_server(vm_ip, mac, vlan, dhcp_path)
 
 
-def create_vxlan_mesh(host_id):
+def create_vxlan_mesh(host_id, logger=None):
     """
     Create vxlan mesh across all openvimc controller and computes.
-    :param host_id: host identifier
-    :param host_id: host identifier
-    :return:
+    :param host_id: Added compute node id. Anyway vlan is created by all compute nodes
+    :param logger: To log errors
+    :return: None
     """
     dhcp_compute_name = get_vxlan_interface("dhcp")
     existing_hosts = get_hosts()
@@ -761,22 +767,27 @@ def create_vxlan_mesh(host_id):
         dhcp_controller = http_controller.ovim.get_dhcp_controller()
 
         for compute in computes_available:
+            try:
+                if compute['ip_name'] != 'localhost':
+                    remote_ip = socket.gethostbyname(compute['ip_name'])
+                else:
+                    remote_ip = 'localhost'
+            except socket.error as e:
+                if logger:
+                    logger.error("Cannot get compute node remote ip from '{}'. Skipping: {}".format(
+                        compute['ip_name'], e))
+                continue
+            # vxlan ovs_controller <=> compute node
             vxlan_interface_name = get_vxlan_interface(compute['id'][:8])
             config_dic['host_threads'][compute['id']].insert_task("new-vxlan", dhcp_compute_name, dhcp_controller.host)
-            dhcp_controller.create_ovs_vxlan_tunnel(vxlan_interface_name, compute['ip_name'])
-
-        # vlxan mesh creation between openvim computes
-        for count, compute_owner in enumerate(computes_available):
-            for compute in computes_available:
-                if compute_owner['id'] == compute['id']:
-                    pass
-                else:
-                    vxlan_interface_name = get_vxlan_interface(compute_owner['id'][:8])
-                    dhcp_controller.create_ovs_vxlan_tunnel(vxlan_interface_name, compute_owner['ip_name'])
-                    config_dic['host_threads'][compute['id']].insert_task("new-vxlan",
-                                                                          vxlan_interface_name,
-                                                                          compute_owner['ip_name'])
-
+            dhcp_controller.create_ovs_vxlan_tunnel(vxlan_interface_name, remote_ip)
+            # vxlan from others compute node to cthis ompute node
+            for compute_src in computes_available:
+                if compute_src['id'] == compute['id']:
+                    continue
+                config_dic['host_threads'][compute_src['id']].insert_task("new-vxlan",
+                                                              vxlan_interface_name,
+                                                              remote_ip)
 
 def delete_vxlan_mesh(host_id):
     """
@@ -847,7 +858,7 @@ def http_put_host_id(host_id):
         if config_dic['network_type'] == 'ovs':
             # create mesh with new host data
             config_dic['host_threads'][host_id].insert_task("new-ovsbridge")
-            create_vxlan_mesh(host_id)
+            create_vxlan_mesh(host_id, my.logger)
 
         #print data
         return format_out(data)

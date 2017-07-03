@@ -298,7 +298,9 @@ host_data_schema={
                             "properties": {
                                 "core_id": integer0_schema,
                                 "thread_id": integer0_schema,
-                                "status": {"type": "string", "enum": ["noteligible"]}
+                                "status": {"type": "string", "enum": ["noteligible"]},
+                                "instance_id": {"type": "string"},   # ignored, just for compatibility with host-list
+                                "v_thread_id": {"type": "integer"}   # ignored, just for compatibility with host-list
                             },
                             "additionalProperties": False,
                             "required": ["core_id", "thread_id"]
@@ -344,7 +346,7 @@ host_data_schema={
         }
     },
     "additionalProperties": False,
-    "required": ["name", "ip_name"]
+    "required": ["name", "user", "ip_name"]
 }
 
 host_edit_schema={

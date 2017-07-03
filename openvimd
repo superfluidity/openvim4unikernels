@@ -232,11 +232,11 @@ if __name__ == "__main__":
             exit(1)
 
         if config_dic['network_type'] == 'ovs' \
-                and config_dic['ovs_controller_ip'] == 'localhost' \
-                and not (config_dic['mode'] == 'test' or config_dic['mode'] == "OF only"):
+                and config_dic['ovs_controller_ip'][:4] == '127.':
+                # and not (config_dic['mode'] == 'test' or config_dic['mode'] == "OF only"):
 
-            error_msg = "Error: invalid value '{}' for ovs_controller_ip at {}. " \
-                        "Use a valid IP address".format(config_dic['ovs_controller_ip'], config_file)
+            error_msg = "Error: invalid value '{}' for ovs_controller_ip at {}. Use 'localhost' word instead "\
+                        "of a loopback IP address".format(config_dic['ovs_controller_ip'], config_file)
 
             print ("!! {} ".format(error_msg))
             logger.error(error_msg)
