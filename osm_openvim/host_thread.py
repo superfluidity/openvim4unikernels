@@ -2710,6 +2710,7 @@ def create_server(server, db, db_lock, only_of_ports):
     elif requirements['vcpus']==0:
         return (-1, "Processor information not set neither at extended field not at vcpus")    
 
+    if 'hypervisor' in server: requirements['hypervisor'] = server['hypervisor']   # CLICKOS MOD
 
     db_lock.acquire()
     result, content = db.get_numas(requirements, server.get('host_id', None), only_of_ports)
@@ -2720,6 +2721,9 @@ def create_server(server, db, db_lock, only_of_ports):
     
     numa_id = content['numa_id']
     host_id = content['host_id']
+
+    print "HHH - Numa ID: " + str(numa_id) #CLICKOS MOD  Debug only
+    print "HHH - Host ID: " + str(host_id) #CLICKOS MOD  Debug only
 
     #obtain threads_id and calculate pinning
     cpu_pinning = []

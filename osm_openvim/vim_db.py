@@ -475,9 +475,9 @@ class vim_db():
                 with self.con:
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)
                     #get HOST
-                    cmd = "SELECT uuid, user, password, keyfile, name, ip_name, description, ranking, admin_state_up, "\
+                    cmd = "SELECT uuid, user, password, keyfile, name, ip_name, description, hypervisors, ranking, admin_state_up, "\
                           "DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%s') as created_at "\
-                          "FROM hosts WHERE " + where_filter
+                          "FROM hosts WHERE " + where_filter   # CLICKOS MOD
                     self.logger.debug(cmd) 
                     self.cur.execute(cmd)
                     if self.cur.rowcount == 0:
@@ -1194,8 +1194,24 @@ class vim_db():
                     self.cur.close()   
                     self.cur = self.con.cursor()
                     match_found = False
+
                     if len(valid_hosts)<=0:
-                        error_text = 'No room at data center. Cannot find a host with %s MB memory and %s cpus available' % (str(requirements['ram']), str(requirements['vcpus'])) 
+                        error_text = 'No room at data center. Cannot find a host with %s MB memory and %s cpus available' % (str(requirements['ram']), str(requirements['vcpus']))
+                        #self.logger.debug(error_text)
+                        return -1, error_text
+
+                    print "HHH - Valid Hosts from DB: " + str(valid_hosts) #CLICKOS MOD Debug only
+                    if not 'hypervisor' in requirements:        #CLICKOS MOD
+                        requirements['hypervisor'] = "kvm"      #CLICKOS MOD
+                    for valid_host in valid_hosts:              #CLICKOS MOD
+                        if not 'hypervisors' in valid_host:     #CLICKOS MOD
+                            valid_host['hypervisors'] = "kvm"   #CLICKOS MOD
+
+                    valid_hosts = tuple(valid_host for valid_host in valid_hosts if requirements['hypervisor'] in valid_host['hypervisors'].split(",")) #CLICKOS MOD
+                    print "HHH - Valid Hosts after check: " + str(valid_hosts) #CLICKOS MOD Debug only
+
+                    if len(valid_hosts)<=0:
+                        error_text = 'No room at data center. Cannot find a host with %s hypervisor or it not have enough resources' % (str(requirements['hypervisor'])) 
                         #self.logger.debug(error_text)
                         return -1, error_text
                     

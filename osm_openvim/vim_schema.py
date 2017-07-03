@@ -269,6 +269,7 @@ host_data_schema={
         "password": nameshort_schema,
         "keyfile": path_schema,
         "features": description_schema,
+        "hypervisors": description_schema,   #CLICKOS MOD
         "ranking": integer0_schema,
         "autodiscover": {"type": "boolean"},    # try to discover host parameters instead of providing in this schema
         "devices": {

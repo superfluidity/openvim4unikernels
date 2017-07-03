@@ -504,7 +504,7 @@ def http_get_hosts():
 
 def get_hosts():
     select_, where_, limit_ = filter_query_string(bottle.request.query, http2db_host,
-                                                  ('id', 'name', 'description', 'status', 'admin_state_up', 'ip_name'))
+                                                  ('id', 'name', 'description', 'status', 'admin_state_up', 'ip_name', 'hypervisors')) #CLICKOS MOD
     
     myself = config_dic['http_threads'][ threading.current_thread().name ]
     result, content = myself.db.get_table(FROM='hosts', SELECT=select_, WHERE=where_, LIMIT=limit_)
@@ -649,7 +649,7 @@ def http_post_hosts():
             thread.start()
             config_dic['host_threads'][ content['uuid'] ] = thread
 
-            if config_dic['network_type'] == 'ovs':
+            if config_dic['network_type'] == 'ovs' and not host_unikernel_mode:  #CLICKOS MOD
                 # create bridge
                 create_dhcp_ovs_bridge()
                 config_dic['host_threads'][content['uuid']].insert_task("new-ovsbridge")
@@ -828,7 +828,7 @@ def http_put_host_id(host_id):
         change_keys_http2db(content, http2db_host, reverse=True)
         data={'host' : content}
 
-        if config_dic['network_type'] == 'ovs':
+        if config_dic['network_type'] == 'ovs' and not config_dic['mode']=='unikernel':  #CLICKOS MOD
             delete_vxlan_mesh(host_id)
             config_dic['host_threads'][host_id].insert_task("del-ovsbridge")
 
@@ -838,7 +838,7 @@ def http_put_host_id(host_id):
         config_dic['host_threads'][host_id].host = content['ip_name']
         config_dic['host_threads'][host_id].insert_task("reload")
 
-        if config_dic['network_type'] == 'ovs':
+        if config_dic['network_type'] == 'ovs' and not config_dic['mode']=='unikernel':  #CLICKOS MOD
             # create mesh with new host data
             config_dic['host_threads'][host_id].insert_task("new-ovsbridge")
             create_vxlan_mesh(host_id)
@@ -861,11 +861,11 @@ def http_delete_host_id(host_id):
     if result == 0:
         bottle.abort(HTTP_Not_Found, content)
     elif result > 0:
-        if config_dic['network_type'] == 'ovs':
+        if config_dic['network_type'] == 'ovs' and not config_dic['mode']=='unikernel':  #CLICKOS MOD
             delete_vxlan_mesh(host_id)
         # terminate thread
         if host_id in config_dic['host_threads']:
-            if config_dic['network_type'] == 'ovs':
+            if config_dic['network_type'] == 'ovs' and not config_dic['mode']=='unikernel':  #CLICKOS MOD
                 config_dic['host_threads'][host_id].insert_task("del-ovsbridge")
             config_dic['host_threads'][host_id].insert_task("exit")
         #return data
