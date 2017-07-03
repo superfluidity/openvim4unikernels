@@ -1315,7 +1315,7 @@ class host_thread(threading.Thread):
             return True
         try:
             port_name = 'ovim-' + str(vlan)
-            command = 'sudo ovs-vsctl del-port br-int ' + port_name
+            command = 'sudo ovs-vsctl --if-exists del-port br-int ' + port_name #CLICKOS MOD
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1416,7 +1416,7 @@ class host_thread(threading.Thread):
             return True
         try:
             port_name = 'ovim-' + str(vlan)
-            command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + str(vlan)
+            command = 'sudo ovs-vsctl --may-exist add-port br-int ' + port_name + ' tag=' + str(vlan) #CLICKOS MOD
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1713,7 +1713,7 @@ class host_thread(threading.Thread):
             return True
         try:
             net_namespace = 'ovim-' + str(vlan)
-            command = 'sudo ovs-vsctl del-port br-int ovs-tap-' + str(vlan)
+            command = 'sudo ovs-vsctl --if-exists del-port br-int ovs-tap-' + str(vlan) #CLICKOS MOD
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1758,7 +1758,7 @@ class host_thread(threading.Thread):
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
 
-            command = 'sudo ovs-vsctl add-port br-int ovs-tap-' + str(vlan) + ' tag=' + str(vlan)
+            command = 'sudo ovs-vsctl --may-exist add-port br-int ovs-tap-' + str(vlan) + ' tag=' + str(vlan) #CLICKOS MOD
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1810,9 +1810,9 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
+            command = 'sudo ovs-vsctl --may-exist add-port br-int ' + vxlan_interface + \
                       ' -- set Interface ' + vxlan_interface + '  type=vxlan options:remote_ip=' + remote_ip + \
-                      ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10'
+                      ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10' #CLICKOS MOD
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
@@ -1836,7 +1836,7 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
+            command = 'sudo ovs-vsctl --if-exists del-port br-int ' + vxlan_interface  #CLICKOS MOD
             self.logger.debug("command: " + command)
             (_, stdout, _) = self.ssh_conn.exec_command(command)
             content = stdout.read()
