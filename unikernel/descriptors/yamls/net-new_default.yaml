@@ -1,0 +1,7 @@
+network:
+    name:               default
+    type:               data
+    provider:           OVS:default
+    enable_dhcp:        false
+    shared:             false
+
