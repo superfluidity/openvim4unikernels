@@ -20,6 +20,9 @@
 #
 # For those usages not covered by the Apache License, Version 2.0 please
 # contact with: nfvlabs@tid.es
+#
+# Modifications Copyright (C) 2017 Paolo Lungaroni - CNIT
+#
 ##
 
 """
@@ -190,7 +193,7 @@ class ovim():
         self.config["db"] = self._create_database_connection()
         self.config["db_lock"] = threading.Lock()
 
-        self.of_test_mode = False if self.config['mode'] == 'normal' or self.config['mode'] == "OF only" else True
+        self.of_test_mode = False if self.config['mode'] == 'normal' or self.config['mode'] == "OF only" or self.config['mode'] == "unikernel" else True #CLICKOS MOD
         # precreate interfaces; [bridge:<host_bridge_name>, VLAN used at Host, uuid of network camping in this bridge,
         # speed in Gbit/s
 
@@ -215,7 +218,7 @@ class ovim():
         if len(used_bridge_nets) > 0:
             self.logger.info("found used bridge nets: " + ",".join(used_bridge_nets))
         # get nets used by dhcp
-        if self.config.get("dhcp_server"):
+        if self.config.get("dhcp_server") and not self.config['mode'] == 'unikernel':  #CLICKOS MOD
             for net in self.config["dhcp_server"].get("nets", ()):
                 r, nets = self.db.get_table(SELECT=('uuid',), FROM='nets', WHERE={'name': net})
                 if r > 0:
@@ -230,7 +233,7 @@ class ovim():
         # create dhcp_server thread
         host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
         dhcp_params = self.config.get("dhcp_server")
-        if dhcp_params:
+        if dhcp_params and not self.config['mode'] == 'unikernel': #CLICKOS MOD
             thread = dt.dhcp_thread(dhcp_params=dhcp_params, test=host_test_mode, dhcp_nets=self.config["dhcp_nets"],
                                     db=self.config["db"], db_lock=self.config["db_lock"],
                                     logger_name=self.logger_name + ".dhcp",
@@ -242,6 +245,7 @@ class ovim():
         host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
         host_develop_mode = True if self.config['mode'] == 'development' else False
         host_develop_bridge_iface = self.config.get('development_bridge', None)
+        host_unikernel_mode = True if self.config['mode'] == 'unikernel' else False  #CLICKOS MOD
 
         # get host list from data base before starting threads
         r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid', 'password', 'keyfile'),
@@ -259,6 +263,9 @@ class ovim():
                                     version=self.config['version'], host_id=host['uuid'],
                                     develop_mode=host_develop_mode,
                                     develop_bridge_iface=host_develop_bridge_iface,
+                                    unikernel_mode=host_unikernel_mode,                         #CLICKOS MOD
+                                    libvirt_conn_mode=self.config['libvirt_conn_mode'],         #CLICKOS MOD
+                                    task_queue_sleep_time=self.config['task_queue_sleep_time'], #CLICKOS MOD
                                     logger_name=self.logger_name + ".host." + host['name'],
                                     debug=self.config.get('log_level_host'))
             thread.start()
@@ -298,6 +305,7 @@ class ovim():
 
         for ofc in ofcs:
             of_conn = self._load_of_module(ofc)
+
             # create ofc thread per of controller
             self._create_ofc_task(ofc['uuid'], ofc['dpid'], of_conn)
 
@@ -1363,6 +1371,7 @@ class ovim():
 
         host_test_mode = True if self.config['mode'] == 'test' or self.config['mode'] == "OF only" else False
         host_develop_mode = True if self.config['mode'] == 'development' else False
+        host_unikernel_mode = True if self.config['mode'] == 'unikernel' else False  #CLICKOS MOD
 
         dhcp_host = ht.host_thread(name='openvim_controller', user=ovs_controller_user, host=controller_ip,
                                    password=self.config.get('ovs_controller_password'),
@@ -1371,6 +1380,9 @@ class ovim():
                                    image_path=self.config['host_image_path'], version=self.config['version'],
                                    host_id='openvim_controller', develop_mode=host_develop_mode,
                                    develop_bridge_iface=bridge_ifaces,
+                                   unikernel_mode=host_unikernel_mode,                         #CLICKOS MOD
+                                   libvirt_conn_mode=self.config['libvirt_conn_mode'],         #CLICKOS MOD
+                                   task_queue_sleep_time=self.config['task_queue_sleep_time'], #CLICKOS MOD
                                    logger_name=self.logger_name + ".host.controller",
                                    debug=self.config.get('log_level_host'))
         # dhcp_host.start()

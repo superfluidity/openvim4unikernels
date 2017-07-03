@@ -20,6 +20,9 @@
 #
 # For those usages not covered by the Apache License, Version 2.0 please
 # contact with: nfvlabs@tid.es
+#
+# Modifications Copyright (C) 2017 Paolo Lungaroni - CNIT
+#
 ##
 
 """
@@ -60,6 +63,8 @@ def load_configuration(configuration_file):
                       'host_ssh_keyfile': None,
                       'network_vlan_range_start': 1000,
                       'network_vlan_range_end': 4096,
+                      'task_queue_sleep_time':1000, #CLICKOS MOD
+                      'libvirt_conn_mode': "ssh",   #CLICKOS MOD
                       'log_level': "DEBUG",
                       'log_level_db': "ERROR",
                       'log_level_of': 'ERROR',
@@ -231,7 +236,11 @@ if __name__ == "__main__":
             logger.error(error_msg)
             exit(1)
 
-        if config_dic['mode'] != 'normal':
+        if config_dic['mode'] == 'unikernel':  #CLICKS MOD
+            print '-----------------------------------------'   #CLICKOS MOD
+            print "-- Warning, openvimd in '%s' mode" % config_dic['mode'] #CLICKOS MOD
+            print '-----------------------------------------'   #CLICKOS MOD
+        elif config_dic['mode'] != 'normal':   #CLICKS MOD
             print ('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
             print ("!! Warning, openvimd in TEST mode '{}'".format(config_dic['mode']))
             print ('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')

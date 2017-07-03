@@ -20,6 +20,9 @@
 #
 # For those usages not covered by the Apache License, Version 2.0 please
 # contact with: nfvlabs@tid.es
+#
+# Modifications Copyright (C) 2017 Paolo Lungaroni - CNIT
+#
 ##
 
 '''
@@ -1051,8 +1054,8 @@ class vim_db():
             try:
                 with self.con:
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)
-                    #get INSTANCE
-                    cmd = "SELECT uuid, name, description, progress, host_id, flavor_id, image_id, status, last_error, "\
+                    #get INSTANCE   #CLICKOS MOD
+                    cmd = "SELECT uuid, name, description, progress, host_id, flavor_id, image_id, status, hypervisor, os_image_type, last_error, "\
                         "tenant_id, ram, vcpus, created_at FROM instances WHERE uuid='{}'".format(instance_id)
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)

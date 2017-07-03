@@ -19,6 +19,9 @@
 #
 # For those usages not covered by the Apache License, Version 2.0 please
 # contact with: nfvlabs@tid.es
+#
+# Modifications Copyright (C) 2017 Paolo Lungaroni - CNIT
+#
 ##
 
 ''' Definition of dictionaries schemas used by validating input
@@ -76,7 +79,9 @@ config_schema = {
         "of_user": nameshort_schema,
         "of_password": nameshort_schema,
         "test_mode": {"type": "boolean"}, # leave for backward compatibility
-        "mode": {"type":"string", "enum":["normal", "host only", "OF only", "development", "test"] },
+        "task_queue_sleep_time": {"type":"integer","minimum":1,"maximun":180000}, #task queue sleep time in ms. min:1ms, max:180000ms. (3 minutes) #CLICKOS MOD
+        "libvirt_conn_mode": {"type" : "string", "enum":["ssh", "tcp", "tls"]}, #CLICKOS MOD
+        "mode": {"type":"string", "enum":["normal", "host only", "OF only", "development", "test", "unikernel"] }, #CLICKOS MOD
         "development_bridge": {"type":"string"},
         "tenant_id": {"type" : "string"},
         "image_path": path_schema,      # leave for backward compatibility
@@ -528,6 +533,8 @@ server_new_schema = {
                 "name":name_schema,
                 "description":description_schema,
                 "start":{"type":"string", "enum":["yes","no","paused"]},
+                "hypervisor":{"type":"string", "enum":["kvm","xen-unik","xenhvm"]}, #CLICKOS MOD
+                "osImageType":{"type":"string", "enum":["clickos","other"]}, #CLICKOS MOD
                 "hostId":id_schema,
                 "flavorRef":id_schema,
                 "imageRef":id_schema,

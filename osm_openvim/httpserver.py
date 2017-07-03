@@ -19,6 +19,9 @@
 #
 # For those usages not covered by the Apache License, Version 2.0 please
 # contact with: nfvlabs@tid.es
+#
+# Modifications Copyright (C) 2017 Paolo Lungaroni - CNIT
+#
 ##
 
 '''
@@ -152,7 +155,7 @@ http2db_host={'id':'uuid'}
 http2db_tenant={'id':'uuid'}
 http2db_flavor={'id':'uuid','imageRef':'image_id'}
 http2db_image={'id':'uuid', 'created':'created_at', 'updated':'modified_at', 'public': 'public'}
-http2db_server={'id':'uuid','hostId':'host_id','flavorRef':'flavor_id','imageRef':'image_id','created':'created_at'}
+http2db_server={'id':'uuid','hostId':'host_id','flavorRef':'flavor_id','osImageType':'os_image_type','imageRef':'image_id','created':'created_at'} #CLICKOS MOD
 http2db_network={'id':'uuid','provider:vlan':'vlan', 'provider:physical': 'provider'}
 http2db_ofc = {'id': 'uuid'}
 http2db_port={'id':'uuid', 'network_id':'net_id', 'mac_address':'mac', 'device_owner':'type','device_id':'instance_id','binding:switch_port':'switch_port','binding:vlan':'vlan', 'bandwidth':'Mbps'}
@@ -633,13 +636,16 @@ def http_post_hosts():
             host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
             host_develop_mode = True if config_dic['mode']=='development' else False
             host_develop_bridge_iface = config_dic.get('development_bridge', None)
+            host_unikernel_mode = True if config_dic['mode']=='unikernel' else False  #CLICKOS MOD
             thread = ht.host_thread(name=host.get('name',ip_name), user=user, host=ip_name,
                                     password=host.get('password'),
                                     keyfile=host.get('keyfile', config_dic["host_ssh_keyfile"]),
                                     db=config_dic['db'], db_lock=config_dic['db_lock'],
                                     test=host_test_mode, image_path=config_dic['host_image_path'],
                                     version=config_dic['version'], host_id=content['uuid'],
-                                    develop_mode=host_develop_mode, develop_bridge_iface=host_develop_bridge_iface)
+                                    develop_mode=host_develop_mode, develop_bridge_iface=host_develop_bridge_iface,
+                                    unikernel_mode=host_unikernel_mode, libvirt_conn_mode=config_dic['libvirt_conn_mode'], #CLICKOS MOD
+                                    task_queue_sleep_time=config_dic['task_queue_sleep_time']) #CLICKOS MOD
             thread.start()
             config_dic['host_threads'][ content['uuid'] ] = thread
 
@@ -1323,9 +1329,13 @@ def http_post_images(tenant_id):
             pass
         # Finally, only if we are in test mode and checksum has not been calculated, we calculate it from the path
         host_test_mode = True if config_dic['mode']=='test' or config_dic['mode']=="OF only" else False
+        host_unikernel_mode = True if config_dic['mode']=='unikernel' else False  #CLICKOS MOD
         if host_test_mode:
             if 'checksum' not in http_content['image']:
                 http_content['image']['checksum'] = md5_string(image_file)
+        elif host_unikernel_mode:     #CLICKOS MOD
+            if 'checksum' not in http_content['image']:   #CLICKOS MOD
+                http_content['image']['checksum'] = None  #CLICKOS MOD
         else:
             # At this point, if the path is a local file and no chechsum has been obtained yet, an error is sent back.
             # If it is a URL, no error is sent. Checksum will be an empty string
@@ -1609,9 +1619,10 @@ def http_post_server_id(tenant_id):
         if server_start == 'no':
             content['status'] = 'INACTIVE'
         dhcp_nets_id = []
-        for net in http_content['server']['networks']:
-            if net['type'] == 'instance:ovs':
-                dhcp_nets_id.append(get_network_id(net['net_id']))
+        if config_dic['mode']=='unikernel': #CLICKOS MOD
+            for net in http_content['server']['networks']:
+                if net['type'] == 'instance:ovs':
+                    dhcp_nets_id.append(get_network_id(net['net_id']))
 
         ports_to_free=[]
         new_instance_result, new_instance = my.db.new_instance(content, nets, ports_to_free)
@@ -1835,8 +1846,9 @@ def http_server_action(server_id, tenant_id, action):
             vm_ip = str(net[2])
             vlan = str(net[1])
             net_id = net[0]
-            delete_dhcp_ovs_bridge(vlan, net_id)
-            delete_mac_dhcp(vm_ip, vlan, mac)
+            if config_dic.get("mode") != "unikernel": #Temporanty solution #CLICKOS MOD
+                delete_dhcp_ovs_bridge(vlan, net_id)
+                delete_mac_dhcp(vm_ip, vlan, mac)
             config_dic['host_threads'][server['host_id']].insert_task('del-ovs-port', vlan, net_id)
     if warn_text:
         data["result"] += warn_text
