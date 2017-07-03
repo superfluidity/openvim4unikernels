@@ -19,6 +19,9 @@
 #
 # For those usages not covered by the Apache License, Version 2.0 please
 # contact with: nfvlabs@tid.es
+#
+# Modifications Copyright (C) 2017 Paolo Lungaroni - CNIT
+#
 ##
 
 '''
@@ -287,6 +290,28 @@ class host_thread(threading.Thread):
                         self.logger.error("Exception deleting file '%s': %s", localfile['source file'], str(e))
                 del self.localinfo['server_files'][uuid]
                 self.localinfo_dirty = True
+
+    def delete_unsed_ovs_bridge(self):
+        """
+        Only for unikernel mode. search openvswitch networks
+        without any port configured and remove them
+        """
+        # obtain data
+        db_filter = {'provider': 'OVS', 'type': 'bridge_data'}
+        result, content = self.db.get_table(FROM='nets', WHERE=db_filter, LIMIT=100)
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+        elif result == 0:
+            return
+            #raise ovimException("show_network network '%s' not found" % network_id, -result)
+        else:
+            for net in content:
+                # get ports from DB
+                result, ports = self.db.get_table(FROM='ports', SELECT=('uuid as port_id',),
+                                                  WHERE={'net_id': net['uuid']}, LIMIT=100)
+                if len(ports) == 0:
+                    self.delete_ovs_bridge("ovim-" + net['name'])
    
     def insert_task(self, task, *aditional):
         try:
