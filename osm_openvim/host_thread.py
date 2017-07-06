@@ -842,7 +842,7 @@ class host_thread(threading.Thread):
             command = 'sudo ip netns exec {} cat {}'.format(dhcp_namespace, pid_file)
             content = self.run_command(command, ignore_exit_status=True)
             dns_pid = content.replace('\n', '')
-            command = 'sudo ip netns exec {} kill -9 '.format(dhcp_namespace, dns_pid)
+            command = 'sudo ip netns exec {} kill -9 {}'.format(dhcp_namespace, dns_pid)
             self.run_command(command, ignore_exit_status=True)
 
         except RunCommandException as e:

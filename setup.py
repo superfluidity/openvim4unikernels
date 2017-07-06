@@ -36,7 +36,9 @@ _req = [
     "bottle",
     "MySQL-python",
     "paramiko",
-    "libvirt-python"
+    "libvirt-python",
+    "pytest",
+    "pexect"
 ]
 
 __scripts__ = ['openflow',
