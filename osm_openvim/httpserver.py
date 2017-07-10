@@ -692,7 +692,7 @@ def delete_dhcp_ovs_bridge(vlan, net_uuid):
     dhcp_controller = http_controller.ovim.get_dhcp_controller()
 
     dhcp_controller.delete_dhcp_server(vlan, net_uuid, dhcp_path)
-    dhcp_controller.delete_dhcp_port(vlan, net_uuid)
+    dhcp_controller.delete_dhcp_port(vlan, net_uuid, dhcp_path)
 
 
 def create_dhcp_ovs_bridge():
@@ -1676,10 +1676,15 @@ def http_post_server_id(tenant_id):
                         dhcp_enable = bool(server_net['network']['enable_dhcp'])
                         vm_dhcp_ip = c2[0]["ip_address"]
                         config_dic['host_threads'][server['host_id']].insert_task("create-ovs-bridge-port", vlan)
-
-                        dns = yaml.safe_load(server_net['network'].get("dns"))
-                        routes = yaml.safe_load(server_net['network'].get("routes"))
-                        links = yaml.safe_load(server_net['network'].get("links"))
+                        dns = server_net['network'].get("dns")
+                        if dns:
+                            dns = yaml.safe_load(server_net['network'].get("dns"))
+                        routes = server_net['network'].get("routes")
+                        if routes:
+                            routes = yaml.safe_load(server_net['network'].get("routes"))
+                        links = server_net['network'].get("links")
+                        if links:
+                            links = yaml.safe_load(server_net['network'].get("links"))
                         if dhcp_enable:
                             dhcp_firt_ip = str(server_net['network']['dhcp_first_ip'])
                             dhcp_last_ip = str(server_net['network']['dhcp_last_ip'])

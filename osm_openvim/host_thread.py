@@ -68,6 +68,7 @@ class host_thread(threading.Thread):
         self.password = password
         self.keyfile = keyfile
         self.localinfo_dirty = False
+        self.connectivity = True
 
         if not test and not host_thread.lvirt_module:
             try:
@@ -113,12 +114,13 @@ class host_thread(threading.Thread):
         self.remote_ip = None
         self.local_ip = None
 
-    def run_command(self, command, keep_session=False):
+    def run_command(self, command, keep_session=False, ignore_exit_status=False):
         """Run a command passed as a str on a localhost or at remote machine.
         :param command: text with the command to execute.
         :param keep_session: if True it returns a <stdin> for sending input with '<stdin>.write("text\n")'.
                 A command with keep_session=True MUST be followed by a command with keep_session=False in order to
                 close the session and get the output
+        :param ignore_exit_status: Return stdout and not raise an exepction in case of error.
         :return: the output of the command if 'keep_session=False' or the <stdin> object if 'keep_session=True'
         :raises: RunCommandException if command fails
         """
@@ -139,8 +141,14 @@ class host_thread(threading.Thread):
                     self.run_command_session = p
                     return p.stdin
                 else:
-                    output = subprocess.check_output(('bash', "-c", command))
-                    returncode = 0
+                    if not ignore_exit_status:
+                        output = subprocess.check_output(('bash', "-c", command))
+                        returncode = 0
+                    else:
+                        out = None
+                        p = subprocess.Popen(('bash', "-c", command), stdout=subprocess.PIPE)
+                        out, err = p.communicate()
+                        return out
             else:
                 if self.run_command_session:
                     (i, o, e) = self.run_command_session
@@ -156,7 +164,7 @@ class host_thread(threading.Thread):
                 returncode = o.channel.recv_exit_status()
                 output = o.read()
                 outerror = e.read()
-            if returncode != 0:
+            if returncode != 0 and not ignore_exit_status:
                 text = "run_command='{}' Error='{}'".format(command, outerror)
                 self.logger.error(text)
                 raise RunCommandException(text)
@@ -192,25 +200,12 @@ class host_thread(threading.Thread):
 
     def check_connectivity(self):
         if not self.test:
-            # TODO change to run_command
             try:
-                if not self.ssh_conn:
-                    self.ssh_connect()
-
                 command = 'sudo brctl show'
-                (_, stdout, stderr) = self.ssh_conn.exec_command(command, timeout=10)
-                content = stderr.read()
-                if len(content) > 0:
-                    self.connectivity = False
-                    self.logger.error("ssh conection error")
-            except paramiko.ssh_exception.SSHException as e:
-                text = e.args[0]
+                self.run_command(command)
+            except RunCommandException as e:
                 self.connectivity = False
-                self.logger.error("ssh_connect ssh Exception: " + text)
-                raise paramiko.ssh_exception.SSHException("ssh error conection")
-            except Exception as e:
-                self.connectivity = False
-                raise paramiko.ssh_exception.SSHException("ssh error conection")
+                self.logger.error("check_connectivity Exception: " + str(e))
 
     def load_localinfo(self):
         if not self.test:
@@ -798,10 +793,9 @@ class host_thread(threading.Thread):
         if self.test or not self.connectivity:
             return True
 
-
         try:
-            self.run_command('sudo', 'ovs-vsctl', '--may-exist', 'add-br', 'br-int', '--', 'set', 'Bridge', 'br-int',
-                             'stp_enable=true')
+            self.run_command('sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true')
+
             return True
         except RunCommandException as e:
             self.logger.error("create_ovs_bridge ssh Exception: " + str(e))
@@ -820,12 +814,12 @@ class host_thread(threading.Thread):
         if self.test or not self.connectivity:
             return True
         try:
-            port_name = 'ovim-' + str(vlan)
-            command = 'sudo ovs-vsctl del-port br-int ' + port_name
+            port_name = 'ovim-{}'.format(str(vlan))
+            command = 'sudo ovs-vsctl del-port br-int {}'.format(port_name)
             self.run_command(command)
             return True
         except RunCommandException as e:
-            self.logger.error("delete_port_to_ovs_bridge ssh Exception: " + str(e))
+            self.logger.error("delete_port_to_ovs_bridge ssh Exception: {}".format(str(e)))
             return False
 
     def delete_dhcp_server(self, vlan, net_uuid, dhcp_path):
@@ -841,28 +835,18 @@ class host_thread(threading.Thread):
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
         try:
-            dhcp_namespace = str(vlan) + '-dnsmasq'
+            dhcp_namespace = '{}-dnsmasq'.format(str(vlan))
             dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
             pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
-            command = 'sudo ip netns exec ' + dhcp_namespace + ' cat ' + pid_file
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns exec {} cat {}'.format(dhcp_namespace, pid_file)
+            content = self.run_command(command, ignore_exit_status=True)
+            dns_pid = content.replace('\n', '')
+            command = 'sudo ip netns exec {} kill -9 '.format(dhcp_namespace, dns_pid)
+            self.run_command(command, ignore_exit_status=True)
 
-            command = 'sudo ip netns exec ' + dhcp_namespace + ' kill -9 ' + content
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
-            # if len(content) == 0:
-            #     return True
-            # else:
-            #     return False
-        except paramiko.ssh_exception.SSHException as e:
+        except RunCommandException as e:
             self.logger.error("delete_dhcp_server ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
             return False
 
     def is_dhcp_port_free(self, host_id, net_uuid):
@@ -914,22 +898,15 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + str(vlan)
-            command = 'sudo ovs-vsctl add-port br-int ' + port_name + ' tag=' + str(vlan)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("add_port_to_ovs_bridge ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            port_name = 'ovim-{}'.format(str(vlan))
+            command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(port_name, str(vlan))
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("add_port_to_ovs_bridge Exception: " + str(e))
             return False
 
-    def delete_dhcp_port(self, vlan, net_uuid):
+    def delete_dhcp_port(self, vlan, net_uuid, dhcp_path):
         """
         Delete from an existing OVS bridge a linux bridge port attached and the linux bridge itself.
         :param vlan: segmentation id
@@ -942,7 +919,7 @@ class host_thread(threading.Thread):
 
         if not self.is_dhcp_port_free(vlan, net_uuid):
             return True
-        self.delete_dhcp_interfaces(vlan)
+        self.delete_dhcp_interfaces(vlan, dhcp_path)
         return True
 
     def delete_bridge_port_attached_to_ovs(self, vlan, net_uuid):
@@ -971,26 +948,15 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + str(vlan)
-            command = 'sudo ip link set dev ovim-' + str(vlan) + ' down'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            # content = stdout.read()
-            #
-            # if len(content) != 0:
-            #     return False
-            command = 'sudo ifconfig ' + port_name + ' down &&  sudo brctl delbr ' + port_name
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("delete_linux_bridge ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            port_name = 'ovim-{}'.format(str(vlan))
+            command = 'sudo ip link set dev ovim-{} down'.format(str(vlan))
+            self.run_command(command)
+
+            command = 'sudo ifconfig {} down &&  sudo brctl delbr {}'.format(port_name, port_name)
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("delete_linux_bridge Exception: {}".format(str(e)))
             return False
 
     def remove_link_bridge_to_ovs(self, vlan, link):
@@ -1004,46 +970,31 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            br_tap_name = str(vlan) + '-vethBO'
-            br_ovs_name = str(vlan) + '-vethOB'
+            br_tap_name = '{}-vethBO'.format(str(vlan))
+            br_ovs_name = '{}-vethOB'.format(str(vlan))
 
             # Delete ovs veth pair
             command = 'sudo ip link set dev {} down'.format(br_ovs_name)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            self.run_command(command)
 
             command = 'sudo ovs-vsctl del-port br-int {}'.format(br_ovs_name)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            self.run_command(command)
 
             # Delete br veth pair
             command = 'sudo ip link set dev {} down'.format(br_tap_name)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            self.run_command(command)
 
             # Delete br veth interface form bridge
             command = 'sudo brctl delif {} {}'.format(link, br_tap_name)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            self.run_command(command)
 
             # Delete br veth pair
             command = 'sudo ip link set dev {} down'.format(link)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            self.run_command(command)
 
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("delete_linux_bridge ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            return True
+        except RunCommandException as e:
+            self.logger.error("remove_link_bridge_to_ovs Exception: {}".format(str(e)))
             return False
 
     def create_ovs_bridge_port(self, vlan):
@@ -1067,48 +1018,21 @@ class host_thread(threading.Thread):
         if self.test:
             return True
         try:
-            port_name = 'ovim-' + str(vlan)
-            command = 'sudo brctl show | grep ' + port_name
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            port_name = 'ovim-{}'.format(str(vlan))
+            command = 'sudo brctl show | grep {}'.format(port_name)
+            result = self.run_command(command, ignore_exit_status=True)
+            if not result:
+                command = 'sudo brctl addbr {}'.format(port_name)
+                self.run_command(command)
 
-            # if exist nothing to create
-            # if len(content) == 0:
-            #     return False
+                command = 'sudo brctl stp {} on'.format(port_name)
+                self.run_command(command)
 
-            command = 'sudo brctl addbr ' + port_name
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
-            # if len(content) == 0:
-            #     return True
-            # else:
-            #     return False
-
-            command = 'sudo brctl stp ' + port_name + ' on'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
-            # if len(content) == 0:
-            #     return True
-            # else:
-            #     return False
-            command = 'sudo ip link set dev ' + port_name + ' up'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("create_linux_bridge ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            command = 'sudo ip link set dev {} up'.format(port_name)
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("create_linux_bridge ssh Exception: {}".format(str(e)))
             return False
 
     def set_mac_dhcp_server(self, ip, mac, vlan, netmask, first_ip, dhcp_path):
@@ -1125,56 +1049,42 @@ class host_thread(threading.Thread):
         if self.test:
             return True
 
-        dhcp_namespace = str(vlan) + '-dnsmasq'
+        dhcp_namespace = '{}-dnsmasq'.format(str(vlan))
         dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
         dhcp_hostsdir = os.path.join(dhcp_path, dhcp_namespace)
+        ns_interface = '{}-vethDO'.format(str(vlan))
 
         if not ip:
             return False
         try:
-
-            ns_interface = str(vlan) + '-vethDO'
-            command = 'sudo  ip netns exec ' + dhcp_namespace + ' cat /sys/class/net/{}/address'.format(ns_interface)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            iface_listen_mac = stdout.read()
+            command = 'sudo ip netns exec {} cat /sys/class/net/{}/address'.format(dhcp_namespace, ns_interface)
+            iface_listen_mac = self.run_command(command, ignore_exit_status=True)
 
             if iface_listen_mac > 0:
-                command = 'sudo  ip netns exec ' + dhcp_namespace + ' cat {} | grep {}'.format(dhcp_hostsdir, dhcp_hostsdir)
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
-                if content > 0:
+                command = 'sudo ip netns exec {} cat {} | grep -i {}'.format(dhcp_namespace,
+                                                                          dhcp_hostsdir,
+                                                                          iface_listen_mac)
+                content = self.run_command(command, ignore_exit_status=True)
+                if content == '':
                     ip_data = iface_listen_mac.upper().replace('\n', '') + ',' + first_ip
                     dhcp_hostsdir = os.path.join(dhcp_path, dhcp_namespace)
 
-                    command = 'sudo  ip netns exec ' + dhcp_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
-                    self.logger.debug("command: " + command)
-                    (_, stdout, _) = self.ssh_conn.exec_command(command)
-                    content = stdout.read()
+                    command = 'sudo  ip netns exec {} sudo bash -ec "echo {} >> {}"'.format(dhcp_namespace,
+                                                                                            ip_data,
+                                                                                            dhcp_hostsdir)
+                    self.run_command(command)
 
+                ip_data = mac.upper() + ',' + ip
+                command = 'sudo  ip netns exec {} sudo bash -ec "echo {} >> {}"'.format(dhcp_namespace,
+                                                                                        ip_data,
+                                                                                        dhcp_hostsdir)
+                self.run_command(command, ignore_exit_status=False)
 
-            ip_data = mac.upper() + ',' + ip
-
-            command = 'sudo  ip netns exec ' + dhcp_namespace + ' touch ' + dhcp_hostsdir
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
-            command = 'sudo  ip netns exec ' + dhcp_namespace + ' sudo bash -ec "echo ' + ip_data + ' >> ' + dhcp_hostsdir + '"'
-
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
-            if len(content) == 0:
                 return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
+
+            return False
+        except RunCommandException as e:
             self.logger.error("set_mac_dhcp_server ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
             return False
 
     def delete_mac_dhcp_server(self, ip, mac, vlan, dhcp_path):
@@ -1201,19 +1111,11 @@ class host_thread(threading.Thread):
             ip_data = mac.upper() + ',' + ip
 
             command = 'sudo  ip netns exec ' + dhcp_namespace + ' sudo sed -i \'/' + ip_data + '/d\' ' + dhcp_hostsdir
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            self.run_command(command)
 
-            if len(content) == 0:
-                return True
-            else:
-                return False
-
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("set_mac_dhcp_server ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            return True
+        except RunCommandException as e:
+            self.logger.error("delete_mac_dhcp_server Exception: " + str(e))
             return False
 
     def launch_dhcp_server(self, vlan, ip_range, netmask, dhcp_path, gateway, dns_list=None, routes=None):
@@ -1239,27 +1141,22 @@ class host_thread(threading.Thread):
             leases_path = os.path.join(dhcp_path, "dnsmasq.leases")
             pid_file = os.path.join(dhcp_path, 'dnsmasq.pid')
 
-
             dhcp_range = ip_range[0] + ',' + ip_range[1] + ',' + netmask
 
-            command = 'sudo ip netns exec ' + dhcp_namespace + ' mkdir -p ' + dhcp_path
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns exec {} mkdir -p {}'.format(dhcp_namespace, dhcp_path)
+            self.run_command(command)
 
+            # check if dnsmasq process is running
+            dnsmasq_is_runing = False
             pid_path = os.path.join(dhcp_path, 'dnsmasq.pid')
-            command = 'sudo  ip netns exec ' + dhcp_namespace + ' cat ' + pid_path
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo  ip netns exec ' + dhcp_namespace + ' ls ' + pid_path
+            content = self.run_command(command, ignore_exit_status=True)
 
             # check if pid is runing
-            pid_status_path = content
             if content:
-                command = "ps aux | awk '{print $2 }' | grep " + pid_status_path
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
+                pid_path = content.replace('\n', '')
+                command = "ps aux | awk '{print $2 }' | grep {}" + pid_path
+                dnsmasq_is_runing = self.run_command(command, ignore_exit_status=True)
 
             gateway_option = ' --dhcp-option=3,' + gateway
 
@@ -1277,7 +1174,7 @@ class host_thread(threading.Thread):
                 for dns in dns_list:
                     dns_data += ',' + dns
 
-            if not content:
+            if not dnsmasq_is_runing:
                 command = 'sudo  ip netns exec ' + dhcp_namespace + ' /usr/sbin/dnsmasq --strict-order --except-interface=lo ' \
                           '--interface=' + ns_interface + \
                           ' --bind-interfaces --dhcp-hostsdir=' + dhcp_path + \
@@ -1289,63 +1186,45 @@ class host_thread(threading.Thread):
                           dhcp_route_option + \
                           dns_data
 
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.readline()
-
-            if len(content) == 0:
+                self.run_command(command)
                 return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
+        except RunCommandException as e:
             self.logger.error("launch_dhcp_server ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
             return False
 
-    def delete_dhcp_interfaces(self, vlan):
+    def delete_dhcp_interfaces(self, vlan, dhcp_path):
         """
-        Create a linux bridge with STP active
+        Delete a linux dnsmasq bridge and namespace
         :param vlan: netowrk vlan id
+        :param dhcp_path: 
         :return:
         """
-
         if self.test:
             return True
         try:
-            br_veth_name = str(vlan) + '-vethDO'
-            ovs_veth_name = str(vlan) + '-vethOD'
-            dhcp_namespace = str(vlan) + '-dnsmasq'
+            br_veth_name ='{}-vethDO'.format(str(vlan))
+            ovs_veth_name = '{}-vethOD'.format(str(vlan))
+            dhcp_namespace = '{}-dnsmasq'.format(str(vlan))
 
-            command = 'sudo ovs-vsctl del-port br-int ' + ovs_veth_name
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
+            command = 'sudo ovs-vsctl del-port br-int {}'.format(ovs_veth_name)
+            self.run_command(command, ignore_exit_status=True)  # to end session
 
-            command = 'sudo ip netns exec ' + dhcp_namespace + ' ip link set dev ' + br_veth_name + ' down'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip link set dev {} down'.format(ovs_veth_name)
+            self.run_command(command, ignore_exit_status=True)  # to end session
 
-            command = 'sudo ip link set dev ' + dhcp_namespace + ' down'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns exec {} ip link set dev {} down'.format(dhcp_namespace, br_veth_name)
+            self.run_command(command, ignore_exit_status=True)
 
-            command = 'sudo brctl delbr ' + dhcp_namespace
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo rm -rf {}'.format(dhcp_path)
+            self.run_command(command)
 
-            command = 'sudo ip netns del ' + dhcp_namespace
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns del {}'.format(dhcp_namespace)
+            self.run_command(command)
 
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("delete_dhcp_interfaces ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            return True
+        except RunCommandException as e:
+            self.logger.error("delete_dhcp_interfaces ssh Exception: {}".format(str(e)))
             return False
 
     def create_dhcp_interfaces(self, vlan, ip_listen_address, netmask):
@@ -1356,62 +1235,42 @@ class host_thread(threading.Thread):
         :param netmask: dhcp net CIDR
         :return: True if success
         """
-
         if self.test:
             return True
         try:
-            ovs_veth_name = str(vlan) + '-vethOD'
-            ns_veth = str(vlan) + '-vethDO'
-            dhcp_namespace = str(vlan) + '-dnsmasq'
+            ovs_veth_name = '{}-vethOD'.format(str(vlan))
+            ns_veth = '{}-vethDO'.format(str(vlan))
+            dhcp_namespace = '{}-dnsmasq'.format(str(vlan))
 
-            command = 'sudo ip netns add ' + dhcp_namespace
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns add {}'.format(dhcp_namespace)
+            self.run_command(command)
 
-            command = 'sudo ip link add ' + ns_veth + ' type veth peer name ' + ovs_veth_name
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip link add {} type veth peer name {}'.format(ns_veth, ovs_veth_name)
+            self.run_command(command)
 
-            command = 'sudo ip link set ' + ns_veth + ' netns ' + dhcp_namespace
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip link set {} netns {}'.format(ns_veth, dhcp_namespace)
+            self.run_command(command)
 
-            command = 'sudo ip netns exec ' + dhcp_namespace + ' ip link set dev ' + ns_veth + ' up'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns exec {} ip link set dev {} up'.format(dhcp_namespace, ns_veth)
+            self.run_command(command)
 
-            command = 'sudo ovs-vsctl add-port br-int ' + ovs_veth_name + ' tag=' + str(vlan)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(ovs_veth_name, str(vlan))
+            self.run_command(command, ignore_exit_status=True)
 
-            command = 'sudo ip link set dev ' + ovs_veth_name + ' up'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip link set dev {} up'.format(ovs_veth_name)
+            self.run_command(command)
 
-            command = 'sudo ip netns exec ' + dhcp_namespace + ' ip link set dev lo up'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+            command = 'sudo ip netns exec {} ip link set dev lo up'.format(dhcp_namespace)
+            self.run_command(command)
 
-            command = 'sudo  ip netns exec ' + dhcp_namespace + ' ' + ' ifconfig  ' + ns_veth \
-                      + ' ' + ip_listen_address + ' netmask ' + netmask
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("create_dhcp_interfaces ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            command = 'sudo  ip netns exec {} ifconfig {} {} netmask {}'.format(dhcp_namespace,
+                                                                                ns_veth,
+                                                                                ip_listen_address,
+                                                                                netmask)
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("create_dhcp_interfaces ssh Exception: {}".format(str(e)))
             return False
 
     def delete_qrouter_connection(self, vlan, link):
@@ -1422,55 +1281,46 @@ class host_thread(threading.Thread):
         :return: 
         """
 
-        ns_qouter = str(vlan) + '-qrouter'
-        qrouter_ovs_veth = str(vlan) + '-vethOQ'
-        qrouter_ns_veth = str(vlan) + '-vethQO'
+        if self.test:
+            return True
+        try:
+            ns_qouter = '{}-qrouter'.format(str(vlan))
+            qrouter_ovs_veth = '{}-vethOQ'.format(str(vlan))
+            qrouter_ns_veth = '{}-vethQO'.format(str(vlan))
+            qrouter_br_veth = '{}-vethBQ'.format(str(vlan))
+            qrouter_ns_router_veth = '{}-vethQB'.format(str(vlan))
 
-        qrouter_br_veth = str(vlan) + '-vethBQ'
-        qrouter_ns_router_veth = str(vlan) + '-vethQB'
+            command = 'sudo ovs-vsctl del-port br-int {}'.format(qrouter_ovs_veth)
+            self.run_command(command)
 
-        # delete ovs veth to ovs br-int
-        command = 'sudo ovs-vsctl del-port br-int {}'.format(qrouter_ovs_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # down ns veth
+            command = 'sudo ip netns exec {} ip link set dev {} down'.format(ns_qouter, qrouter_ns_veth)
+            self.run_command(command)
 
-        # down ns veth
-        command = 'sudo ip netns exec {} ip link set dev {} down'.format(ns_qouter, qrouter_ns_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            command = 'sudo ip netns del ' + ns_qouter
+            self.run_command(command)
 
-        # down ovs veth interface
-        command = 'sudo ip link set dev {} down'.format(qrouter_br_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # down ovs veth interface
+            command = 'sudo ip link set dev {} down'.format(qrouter_br_veth)
+            self.run_command(command)
 
-        # down br veth interface
-        command = 'sudo ip link set dev {} down'.format(qrouter_ovs_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # down br veth interface
+            command = 'sudo ip link set dev {} down'.format(qrouter_ovs_veth)
+            self.run_command(command)
 
-        # down br veth interface
-        command = 'sudo ip link set dev {} down'.format(qrouter_ns_router_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # down br veth interface
+            command = 'sudo ip link set dev {} down'.format(qrouter_ns_router_veth)
+            self.run_command(command)
 
-        # down br veth interface
-        command = 'sudo brctl delif {} {}'.format(link, qrouter_br_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # down br veth interface
+            command = 'sudo brctl delif {} {}'.format(link, qrouter_br_veth)
+            self.run_command(command)
 
-
-        # delete NS
-        command = 'sudo ip netns del ' + ns_qouter
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # delete NS
+            return True
+        except RunCommandException as e:
+            self.logger.error("delete_qrouter_connection ssh Exception: {}".format(str(e)))
+            return False
 
     def create_qrouter_ovs_connection(self, vlan, gateway, dhcp_cidr):
         """
@@ -1480,76 +1330,86 @@ class host_thread(threading.Thread):
         :return: 
         """
 
-        ns_qouter = str(vlan) + '-qrouter'
-        qrouter_ovs_veth = str(vlan) + '-vethOQ'
-        qrouter_ns_veth = str(vlan) + '-vethQO'
+        if self.test:
+            return True
 
-        # Create NS
-        command = 'sudo ip netns add ' + ns_qouter
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+        try:
+            ns_qouter = '{}-qrouter'.format(str(vlan))
+            qrouter_ovs_veth ='{}-vethOQ'.format(str(vlan))
+            qrouter_ns_veth = '{}-vethQO'.format(str(vlan))
 
-        # Create pait veth
-        command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_ns_veth, qrouter_ovs_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # Create NS
+            command = 'sudo ip netns add {}'.format(ns_qouter)
+            self.run_command(command)
 
-        # up ovs veth interface
-        command = 'sudo ip link set dev {} up'.format(qrouter_ovs_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # Create pait veth
+            command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_ns_veth, qrouter_ovs_veth)
+            self.run_command(command)
 
-        # add ovs veth to ovs br-int
-        command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(qrouter_ovs_veth, vlan)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # up ovs veth interface
+            command = 'sudo ip link set dev {} up'.format(qrouter_ovs_veth)
+            self.run_command(command)
 
-        # add veth to ns
-        command = 'sudo ip link set {} netns {}'.format(qrouter_ns_veth, ns_qouter)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # add ovs veth to ovs br-int
+            command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(qrouter_ovs_veth, vlan)
+            self.run_command(command)
 
-        # up ns loopback
-        command = 'sudo ip netns exec {} ip link set dev lo up'.format(ns_qouter)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # add veth to ns
+            command = 'sudo ip link set {} netns {}'.format(qrouter_ns_veth, ns_qouter)
+            self.run_command(command)
 
-        # up ns veth
-        command = 'sudo ip netns exec {} ip link set dev {} up'.format(ns_qouter, qrouter_ns_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            # up ns loopback
+            command = 'sudo ip netns exec {} ip link set dev lo up'.format(ns_qouter)
+            self.run_command(command)
 
-        from netaddr import IPNetwork
-        ip_tools = IPNetwork(dhcp_cidr)
-        cidr_len = ip_tools.prefixlen
+            # up ns veth
+            command = 'sudo ip netns exec {} ip link set dev {} up'.format(ns_qouter, qrouter_ns_veth)
+            self.run_command(command)
 
-        # set gw to ns veth
-        command = 'sudo ip netns exec {} ip address add {}/{} dev {}'.format(ns_qouter, gateway, cidr_len, qrouter_ns_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            from netaddr import IPNetwork
+            ip_tools = IPNetwork(dhcp_cidr)
+            cidr_len = ip_tools.prefixlen
+
+            # set gw to ns veth
+            command = 'sudo ip netns exec {} ip address add {}/{} dev {}'.format(ns_qouter, gateway, cidr_len, qrouter_ns_veth)
+            self.run_command(command)
+
+            return True
+
+        except RunCommandException as e:
+            self.logger.error("Create_dhcp_interfaces ssh Exception: {}".format(str(e)))
+            return False
 
     def add_ns_routes(self, vlan, routes):
+        """
+        
+        :param vlan: 
+        :param routes: 
+        :return: 
+        """
 
-        for key, value in routes.iteritems():
-            ns_qouter = str(vlan) + '-qrouter'
-            qrouter_ns_router_veth = str(vlan) + '-vethQB'
-            # up ns veth
-            if key == 'default':
-                command = 'sudo ip netns exec {} ip route add {} via {} '.format(ns_qouter,  key, value)
-            else:
-                command = 'sudo ip netns exec {} ip route add {} via {} dev {}'.format(ns_qouter, key, value,
-                                                                                       qrouter_ns_router_veth)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+        if self.test:
+            return True
+
+        try:
+            ns_qouter = '{}-qrouter'.format(str(vlan))
+            qrouter_ns_router_veth = '{}-vethQB'.format(str(vlan))
+
+            for key, value in routes.iteritems():
+                # up ns veth
+                if key == 'default':
+                    command = 'sudo ip netns exec {} ip route add {} via {} '.format(ns_qouter,  key, value)
+                else:
+                    command = 'sudo ip netns exec {} ip route add {} via {} dev {}'.format(ns_qouter, key, value,
+                                                                                           qrouter_ns_router_veth)
+
+                self.run_command(command)
+
+                return True
+
+        except RunCommandException as e:
+            self.logger.error("add_ns_routes, error adding routes to namesapce, {}".format(str(e)))
+            return False
 
     def create_qrouter_br_connection(self, vlan, cidr, link):
         """
@@ -1559,63 +1419,57 @@ class host_thread(threading.Thread):
         :return: 
         """
 
-        ns_qouter = str(vlan) + '-qrouter'
-        qrouter_ns_router_veth = str(vlan) + '-vethQB'
-        qrouter_br_veth = str(vlan) + '-vethBQ'
+        if self.test:
+            return True
 
-        # Create pait veth
-        command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_br_veth, qrouter_ns_router_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+        try:
+            ns_qouter = '{}-qrouter'.format(str(vlan))
+            qrouter_ns_router_veth = '{}-vethQB'.format(str(vlan))
+            qrouter_br_veth = '{}-vethBQ'.format(str(vlan))
 
-        # up ovs veth interface
-        command = 'sudo ip link set dev {} up'.format(qrouter_br_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            command = 'sudo brctl show | grep {}'.format(link['iface'])
+            content = self.run_command(command, ignore_exit_status=True)
 
-        # add veth to ns
-        command = 'sudo ip link set {} netns {}'.format(qrouter_ns_router_veth, ns_qouter)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+            if content > '':
+                # Create pait veth
+                command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_br_veth, qrouter_ns_router_veth)
+                self.run_command(command)
 
-        # up ns veth
-        command = 'sudo ip netns exec {} ip link set dev {} up'.format(ns_qouter, qrouter_ns_router_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+                # up ovs veth interface
+                command = 'sudo ip link set dev {} up'.format(qrouter_br_veth)
+                self.run_command(command)
 
-        command = 'sudo ip netns exec {} ip address add {} dev {}'.format(ns_qouter, link['nat'], qrouter_ns_router_veth)
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+                # add veth to ns
+                command = 'sudo ip link set {} netns {}'.format(qrouter_ns_router_veth, ns_qouter)
+                self.run_command(command)
 
-        command = 'sudo brctl show | grep {}'.format(link['iface'])
-        self.logger.debug("command: " + command)
-        (_, stdout, _) = self.ssh_conn.exec_command(command)
-        content = stdout.read()
+                # up ns veth
+                command = 'sudo ip netns exec {} ip link set dev {} up'.format(ns_qouter, qrouter_ns_router_veth)
+                self.run_command(command)
 
-        if content > '':
-            # up ns veth
-            command = 'sudo brctl addif {} {}'.format(link['iface'], qrouter_br_veth)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+                command = 'sudo ip netns exec {} ip address add {} dev {}'.format(ns_qouter,
+                                                                                  link['nat'],
+                                                                                  qrouter_ns_router_veth)
+                self.run_command(command)
 
-            # up ns veth
-            command = 'sudo ip netns exec {} iptables -t nat -A POSTROUTING -o {} -s {} -d {} -j MASQUERADE' \
-                .format(ns_qouter, qrouter_ns_router_veth, link['nat'], cidr)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
+                # up ns veth
+                command = 'sudo brctl addif {} {}'.format(link['iface'], qrouter_br_veth)
+                self.run_command(command)
 
+                # up ns veth
+                command = 'sudo ip netns exec {} iptables -t nat -A POSTROUTING -o {} -s {} -d {} -j MASQUERADE' \
+                    .format(ns_qouter, qrouter_ns_router_veth, link['nat'], cidr)
+                self.run_command(command)
 
-        else:
-            self.logger.error('Bridge {} given by user not exist'.format(qrouter_br_veth))
+                return True
+            else:
 
+                self.logger.error('create_qrouter_br_connection, Bridge {} given by user not exist'.format(qrouter_br_veth))
+                return False
 
+        except RunCommandException as e:
+            self.logger.error("Error creating qrouter, {}".format(str(e)))
+            return False
 
     def create_link_bridge_to_ovs(self, vlan, link):
         """
@@ -1627,52 +1481,34 @@ class host_thread(threading.Thread):
             return True
         try:
 
-            br_tap_name = str(vlan) + '-vethBO'
-            br_ovs_name = str(vlan) + '-vethOB'
+            br_tap_name = '{}-vethBO'.format(str(vlan))
+            br_ovs_name = '{}-vethOB'.format(str(vlan))
 
             # is a bridge or a interface
             command = 'sudo brctl show | grep {}'.format(link)
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-
+            content = self.run_command(command, ignore_exit_status=True)
             if content > '':
                 command = 'sudo ip link add {} type veth peer name {}'.format(br_tap_name, br_ovs_name)
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
+                self.run_command(command)
 
                 command = 'sudo ip link set dev {}  up'.format(br_tap_name)
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
+                self.run_command(command)
 
                 command = 'sudo ip link set dev {}  up'.format(br_ovs_name)
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
+                self.run_command(command)
 
                 command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(br_ovs_name, str(vlan))
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
+                self.run_command(command)
 
                 command = 'sudo brctl addif ' + link + ' {}'.format(br_tap_name)
-                self.logger.debug("command: " + command)
-                (_, stdout, _) = self.ssh_conn.exec_command(command)
-                content = stdout.read()
-
-                if len(content) == 0:
-                    return True
-                else:
-                    return False
+                self.run_command(command)
+                return True
             else:
                 self.logger.error('Link is not present, please check {}'.format(link))
                 return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("create_dhcp_interfaces ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+
+        except RunCommandException as e:
+            self.logger.error("create_link_bridge_to_ovs, Error creating link to ovs, {}".format(str(e)))
             return False
 
     def create_ovs_vxlan_tunnel(self, vxlan_interface, remote_ip):
@@ -1686,24 +1522,19 @@ class host_thread(threading.Thread):
             return True
         if remote_ip == 'localhost':
             if self.localhost:
-                return   # TODO: Cannot create a vxlan between localhost and localhost
+                return True # TODO: Cannot create a vxlan between localhost and localhost
             remote_ip = self.local_ip
         try:
-            command = 'sudo ovs-vsctl add-port br-int ' + vxlan_interface + \
-                      ' -- set Interface ' + vxlan_interface + '  type=vxlan options:remote_ip=' + remote_ip + \
-                      ' -- set Port ' + vxlan_interface + ' other_config:stp-path-cost=10'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-            # print content
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("create_ovs_vxlan_tunnel ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+
+            command = 'sudo ovs-vsctl add-port br-int {} -- set Interface {} type=vxlan options:remote_ip={} ' \
+                      '-- set Port {} other_config:stp-path-cost=10'.format(vxlan_interface,
+                                                                            vxlan_interface,
+                                                                            remote_ip,
+                                                                            vxlan_interface)
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("create_ovs_vxlan_tunnel, error creating vxlan tunnel, {}".format(str(e)))
             return False
 
     def delete_ovs_vxlan_tunnel(self, vxlan_interface):
@@ -1715,19 +1546,11 @@ class host_thread(threading.Thread):
         if self.test or not self.connectivity:
             return True
         try:
-            command = 'sudo ovs-vsctl del-port br-int ' + vxlan_interface
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-            # print content
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("delete_ovs_vxlan_tunnel ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            command = 'sudo ovs-vsctl del-port br-int {}'.format(vxlan_interface)
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("delete_ovs_vxlan_tunnel, error deleting vxlan tunenl, {}".format(str(e)))
             return False
 
     def delete_ovs_bridge(self):
@@ -1739,17 +1562,10 @@ class host_thread(threading.Thread):
             return True
         try:
             command = 'sudo ovs-vsctl del-br br-int'
-            self.logger.debug("command: " + command)
-            (_, stdout, _) = self.ssh_conn.exec_command(command)
-            content = stdout.read()
-            if len(content) == 0:
-                return True
-            else:
-                return False
-        except paramiko.ssh_exception.SSHException as e:
-            self.logger.error("delete_ovs_bridge ssh Exception: " + str(e))
-            if "SSH session not active" in str(e):
-                self.ssh_connect()
+            self.run_command(command)
+            return True
+        except RunCommandException as e:
+            self.logger.error("delete_ovs_bridge ssh Exception: {}".format(str(e)))
             return False
 
     def get_file_info(self, path):
