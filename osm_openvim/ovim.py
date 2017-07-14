@@ -283,7 +283,7 @@ class ovim():
 
         for net in content:
             net_type = net['type']
-            if (net_type == 'bridge_data' or net_type == 'bridge_man') and \
+            if net['status'] != "INACTIVE" and (net_type == 'bridge_data' or net_type == 'bridge_man') and \
                     net["provider"][:4] == 'OVS:' and net["enable_dhcp"] == "true":
                 try:
                     config_routes = net.get('routes')
@@ -309,12 +309,15 @@ class ovim():
                                             dns,
                                             routes)
                     self.launch_link_bridge_to_ovs(net['vlan'], net.get('gateway_ip'), net.get('cidr'), links, routes)
+                    if net["status"] == "ERROR":
+                        self.db.update_rows("nets", UPDATE={"status": "ACTIVE", "last_error": None},
+                                            WHERE={"uuid": net["uuid"]})
                 except Exception as e:
                     self.logger.error("Fail at launching dhcp server for net_id='%s' net_name='%s': %s",
                                       net["uuid"], net["name"], str(e))
-                    self.db.update_rows("nets", {"status": "ERROR",
+                    self.db.update_rows("nets", UPDATE={"status": "ERROR",
                                                  "last_error": "Fail at launching dhcp server: " + str(e)},
-                                        {"uuid": net["uuid"]})
+                                        WHERE={"uuid": net["uuid"]})
 
     def _start_of_db_tasks(self):
         """

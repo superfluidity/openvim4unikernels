@@ -1428,9 +1428,12 @@ class vim_db():
                             used_dhcp_ips = self._get_dhcp_ip_used_list(iface["net_id"])
                             iface["ip_address"] = self.get_free_ip_from_range(dhcp_first_ip, dhcp_last_ip,
                                                                               dhcp_cidr, used_dhcp_ips)
-                            del iface['links']
-                            del iface['dns']
-                            del iface['routes']
+                            if 'links' in iface:
+                                del iface['links']
+                            if 'dns' in iface:
+                                del iface['dns']
+                            if 'routes' in iface:
+                                del iface['routes']
 
                         iface['uuid'] = str(myUuid.uuid1()) # create_uuid
                         cmd = "INSERT INTO uuids (uuid, root_uuid, used_at) VALUES ('%s','%s', 'ports')" % (iface['uuid'], uuid)
