@@ -286,8 +286,21 @@ class ovim():
             if (net_type == 'bridge_data' or net_type == 'bridge_man') and \
                     net["provider"][:4] == 'OVS:' and net["enable_dhcp"] == "true":
                 try:
-                    routes = yaml.safe_load(net.get('routes'))
-                    dns = yaml.safe_load(net.get('dns'))
+                    config_routes = net.get('routes')
+                    if config_routes:
+                        routes = yaml.safe_load(config_routes)
+                    else:
+                        routes = None
+
+                    config_dns = net.get('dns')
+                    if config_dns:
+                        dns = yaml.safe_load(config_dns)
+                    else:
+                        dns = None
+
+                    links = net.get('links')
+                    if links:
+                        links = yaml.safe_load(net.get('links'))
                     self.launch_dhcp_server(net.get('vlan'),
                                             net.get('dhcp_first_ip'),
                                             net.get('dhcp_last_ip'),
@@ -295,7 +308,7 @@ class ovim():
                                             net.get('gateway_ip'),
                                             dns,
                                             routes)
-                    self.launch_link_bridge_to_ovs(net['vlan'], net.get('links'), net.get('routes'))
+                    self.launch_link_bridge_to_ovs(net['vlan'], net.get('gateway_ip'), net.get('cidr'), links, routes)
                 except Exception as e:
                     self.logger.error("Fail at launching dhcp server for net_id='%s' net_name='%s': %s",
                                       net["uuid"], net["name"], str(e))
@@ -1422,7 +1435,7 @@ class ovim():
         dhcp_path = self.config['ovs_controller_file_path']
 
         controller_host = self.get_dhcp_controller()
-        # TODO leo check if is need ti to create an ovim-vlan bridge, looks like not
+
         # controller_host.create_linux_bridge(vlan)
         controller_host.create_dhcp_interfaces(vlan, first_ip, dhcp_netmask)
         dhcp_path = self.config['ovs_controller_file_path']
