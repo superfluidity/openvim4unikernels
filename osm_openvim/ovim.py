@@ -301,13 +301,14 @@ class ovim():
                     links = net.get('links')
                     if links:
                         links = yaml.safe_load(net.get('links'))
-                    self.launch_dhcp_server(net.get('vlan'),
-                                            net.get('dhcp_first_ip'),
-                                            net.get('dhcp_last_ip'),
-                                            net.get('cidr'),
-                                            net.get('gateway_ip'),
-                                            dns,
-                                            routes)
+                    if net.get('enable_dhcp'):
+                        self.launch_dhcp_server(net.get('vlan'),
+                                                net.get('dhcp_first_ip'),
+                                                net.get('dhcp_last_ip'),
+                                                net.get('cidr'),
+                                                net.get('gateway_ip'),
+                                                dns,
+                                                routes)
                     self.launch_link_bridge_to_ovs(net['vlan'], net.get('gateway_ip'), net.get('cidr'), links, routes)
                     if net["status"] == "ERROR":
                         self.db.update_rows("nets", UPDATE={"status": "ACTIVE", "last_error": None},
@@ -671,11 +672,10 @@ class ovim():
             network['routes'] = yaml.safe_dump(network['routes'], default_flow_style=True, width=256)
 
         result, content = self.db.new_row('nets', network, True, True)
-
         if result >= 0 and dhcp_integrity:
             if bridge_net:
                 bridge_net[3] = content
-            if self.config.get("dhcp_server") and self.config['network_type'] == 'bridge':
+            if self.config.get("dhcp_server") and self.config['network_type'] == 'bridge': # \
                 if network["name"] in self.config["dhcp_server"].get("nets", ()):
                     self.config["dhcp_nets"].append(content)
                     self.logger.debug("dhcp_server: add new net", content)
@@ -784,6 +784,7 @@ class ovim():
         :param network_id:  network id
         :return:
         """
+        net_data = self.show_network(network_id)
 
         # delete from the data base
         result, content = self.db.delete_row('nets', network_id)
@@ -797,7 +798,18 @@ class ovim():
                     break
             if self.config.get("dhcp_server") and network_id in self.config["dhcp_nets"]:
                 self.config["dhcp_nets"].remove(network_id)
-            return content
+
+            if net_data.get('enable_dhcp'):
+                dhcp_path = self.config['ovs_controller_file_path']
+                dhcp_controller = self.get_dhcp_controller()
+                dhcp_controller.delete_dhcp_server(net_data['vlan'], network_id, dhcp_path)
+                dhcp_controller.delete_dhcp_port(net_data['vlan'], network_id, dhcp_path)
+                links = yaml.load(net_data.get('links'))
+                if links:
+                    links = yaml.load(net_data.get('links'))
+                    self.delete_link_bridge_to_ovs(net_data['vlan'], links)
+
+                return content
         else:
             raise ovimException("Error deleting network '{}': {}".format(network_id, content), -result)
 

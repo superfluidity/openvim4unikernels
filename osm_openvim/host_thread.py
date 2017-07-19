@@ -952,7 +952,7 @@ class host_thread(threading.Thread):
             command = 'sudo ip link set dev ovim-{} down'.format(str(vlan))
             self.run_command(command)
 
-            command = 'sudo ifconfig {} down &&  sudo brctl delbr {}'.format(port_name, port_name)
+            command = 'sudo  ip link delete  {}  &&  sudo brctl delbr {}'.format(port_name, port_name)
             self.run_command(command)
             return True
         except RunCommandException as e:
@@ -975,14 +975,14 @@ class host_thread(threading.Thread):
 
             # Delete ovs veth pair
             command = 'sudo ip link set dev {} down'.format(br_ovs_name)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
 
             command = 'sudo ovs-vsctl del-port br-int {}'.format(br_ovs_name)
             self.run_command(command)
 
             # Delete br veth pair
             command = 'sudo ip link set dev {} down'.format(br_tap_name)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
 
             # Delete br veth interface form bridge
             command = 'sudo brctl delif {} {}'.format(link, br_tap_name)
@@ -990,7 +990,7 @@ class host_thread(threading.Thread):
 
             # Delete br veth pair
             command = 'sudo ip link set dev {} down'.format(link)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
 
             return True
         except RunCommandException as e:
@@ -1213,6 +1213,9 @@ class host_thread(threading.Thread):
             command = 'sudo ip link set dev {} down'.format(ovs_veth_name)
             self.run_command(command, ignore_exit_status=True)  # to end session
 
+            command = 'sudo ip link delete {} '.format(ovs_veth_name)
+            self.run_command(command, ignore_exit_status=True)
+
             command = 'sudo ip netns exec {} ip link set dev {} down'.format(dhcp_namespace, br_veth_name)
             self.run_command(command, ignore_exit_status=True)
 
@@ -1291,26 +1294,37 @@ class host_thread(threading.Thread):
             qrouter_ns_router_veth = '{}-vethQB'.format(str(vlan))
 
             command = 'sudo ovs-vsctl del-port br-int {}'.format(qrouter_ovs_veth)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
 
             # down ns veth
             command = 'sudo ip netns exec {} ip link set dev {} down'.format(ns_qouter, qrouter_ns_veth)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
+
+            command = 'sudo ip netns exec {}  ip link delete {} '.format(ns_qouter, qrouter_ns_veth)
+            self.run_command(command, ignore_exit_status=True)
 
             command = 'sudo ip netns del ' + ns_qouter
             self.run_command(command)
 
             # down ovs veth interface
             command = 'sudo ip link set dev {} down'.format(qrouter_br_veth)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
 
             # down br veth interface
             command = 'sudo ip link set dev {} down'.format(qrouter_ovs_veth)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
+
+            # delete  veth interface
+            command = 'sudo ip link delete {} '.format(link, qrouter_ovs_veth)
+            self.run_command(command, ignore_exit_status=True)
 
             # down br veth interface
             command = 'sudo ip link set dev {} down'.format(qrouter_ns_router_veth)
-            self.run_command(command)
+            self.run_command(command, ignore_exit_status=True)
+
+            # delete  veth interface
+            command = 'sudo ip link delete {} '.format(link, qrouter_ns_router_veth)
+            self.run_command(command, ignore_exit_status=True)
 
             # down br veth interface
             command = 'sudo brctl delif {} {}'.format(link, qrouter_br_veth)
@@ -1344,7 +1358,7 @@ class host_thread(threading.Thread):
 
             # Create pait veth
             command = 'sudo ip link add {} type veth peer name {}'.format(qrouter_ns_veth, qrouter_ovs_veth)
-            self.run_command(command)
+            self.run_command(command,  ignore_exit_status=True)
 
             # up ovs veth interface
             command = 'sudo ip link set dev {} up'.format(qrouter_ovs_veth)
