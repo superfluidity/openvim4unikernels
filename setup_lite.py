@@ -35,9 +35,7 @@ _req = [
     "netaddr",
     "bottle",
     "MySQL-python",
-    "paramiko",
-    "pytest",
-    "pexect"
+    "paramiko"
 ]
 
 __scripts__ = ['openflow-lib']

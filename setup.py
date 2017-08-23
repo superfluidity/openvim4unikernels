@@ -38,7 +38,7 @@ _req = [
     "paramiko",
     "libvirt-python",
     "pytest",
-    "pexect"
+    "pexpect"
 ]
 
 __scripts__ = ['openflow',
