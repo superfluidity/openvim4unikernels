@@ -43,8 +43,8 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.18-r534"
-version_date = "Jun 2017"
+__version__ = "0.5.20-r536"
+version_date = "Sep 2017"
 database_version = 21      #needed database schema version
 
 HTTP_Bad_Request =          400
@@ -1361,6 +1361,8 @@ class ovim():
                 map['switch_dpid'] = switch_dpid
             if region:
                 map['region'] = region
+            if map.get("pci"):
+                map["pci"] = map["pci"].lower()
 
         for of_map in of_maps:
             result, uuid = self.db.new_row('of_port_mappings', of_map, True)

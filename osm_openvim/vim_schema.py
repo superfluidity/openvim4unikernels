@@ -32,27 +32,36 @@ __date__ ="$10-jul-2014 12:07:15$"
 #
 
 path_schema = {"type": "string", "maxLength": 255, "pattern": "^(\.){0,2}(/[^/\"':{}\(\)]+)+$"}
-http_schema={"type":"string", "pattern":"^https?://[^'\"=]+$"}
-port_schema={"type":"integer","minimum":1,"maximun":65534}
-ip_schema={"type":"string","pattern":"^([0-9]{1,3}.){3}[0-9]{1,3}$"}
-cidr_schema={"type":"string","pattern":"^([0-9]{1,3}.){3}[0-9]{1,3}/[0-9]{1,2}$"}
-name_schema={"type" : "string", "minLength":1, "maxLength":255, "pattern" : "^[^,;()'\"]+$"}
-nameshort_schema={"type" : "string", "minLength":1, "maxLength":64, "pattern" : "^[^,;()'\"]+$"}
-nametiny_schema={"type" : "string", "minLength":1, "maxLength":12, "pattern" : "^[^,;()'\"]+$"}
-xml_text_schema={"type" : "string", "minLength":1, "maxLength":1000, "pattern" : "^[^']+$"}
-description_schema={"type" : ["string","null"], "maxLength":255, "pattern" : "^[^'\"]+$"}
-id_schema_fake = {"type" : "string", "minLength":2, "maxLength":36 }  #"pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
-id_schema = {"type" : "string", "pattern": "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$"}
-pci_schema={"type":"string", "pattern":"^[0-9a-fA-F]{4}(:[0-9a-fA-F]{2}){2}\.[0-9a-fA-F]$"}
-bandwidth_schema={"type":"string", "pattern" : "^[0-9]+ *([MG]bps)?$"}
-integer0_schema={"type":"integer","minimum":0}
-integer1_schema={"type":"integer","minimum":1}
-vlan_schema={"type":"integer","minimum":1,"maximun":4095}
-vlan1000_schema={"type":"integer","minimum":1000,"maximun":4095}
-mac_schema={"type":"string", "pattern":"^[0-9a-fA-F][02468aceACE](:[0-9a-fA-F]{2}){5}$"}  #must be unicast LSB bit of MSB byte ==0 
-net_bind_schema={"oneOf":[{"type":"null"},{"type":"string", "pattern":"^(default|((bridge|macvtap):[0-9a-zA-Z\.\-]{1,50})|openflow:[/0-9a-zA-Z\.\-]{1,50}(:vlan)?)$"}]}
-yes_no_schema={"type":"string", "enum":["yes", "no"]}
-log_level_schema={"type":"string", "enum":["DEBUG", "INFO", "WARNING","ERROR","CRITICAL"]}
+http_schema = {"type": "string", "pattern": "^https?://[^'\"=]+$"}
+port_schema = {"type": "integer","minimum": 1, "maximun": 65534}
+ip_schema = {"type": "string", "pattern": "^([0-9]{1,3}.){3}[0-9]{1,3}$"}
+cidr_schema = {"type": "string", "pattern": "^([0-9]{1,3}.){3}[0-9]{1,3}/[0-9]{1,2}$"}
+name_schema = {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^,;()'\"]+$"}
+nameshort_schema = {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^,;()'\"]+$"}
+nametiny_schema = {"type": "string", "minLength": 1, "maxLength": 12, "pattern": "^[^,;()'\"]+$"}
+xml_text_schema = {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^']+$"}
+description_schema = {"type": ["string", "null"], "maxLength": 255, "pattern": "^[^'\"]+$"}
+id_schema_fake = {"type": "string", "minLength": 2, "maxLength": 36}
+                  # "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
+id_schema = {"type": "string", "pattern": "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$"}
+pci_schema = {"type": "string", "pattern": "^[0-9a-fA-F]{4}(:[0-9a-fA-F]{2}){2}\.[0-9a-fA-F]$"}
+# used by VIO neutron-port-show <host_moid>-<domain>:<bus>:<device>.<function>-<VF-id>
+pci_extended_schema = {"type": "string", "pattern": "^([0-9a-fA-F]{4}-)?[0-9a-fA-F]{4}(:[0-9a-fA-F]{2}){2}"
+                                                     "\.[0-9a-fA-F](-[0-9a-fA-F]{3})?$"}
+bandwidth_schema = {"type": "string", "pattern": "^[0-9]+ *([MG]bps)?$"}
+integer0_schema = {"type": "integer", "minimum": 0}
+integer1_schema = {"type": "integer", "minimum": 1}
+vlan_schema = {"type": "integer", "minimum": 1, "maximun": 4095}
+vlan1000_schema = {"type": "integer", "minimum": 1000, "maximun": 4095}
+mac_schema = {"type": "string", "pattern": "^[0-9a-fA-F][02468aceACE](:[0-9a-fA-F]{2}){5}$"}
+            # must be unicast LSB bit of MSB byte ==0
+net_bind_schema = {"oneOf": [
+    {"type": "null"},
+    {"type": "string", "pattern":
+        "^(default|((bridge|macvtap):[0-9a-zA-Z\.\-]{1,50})|openflow:[/0-9a-zA-Z\.\-]{1,50}(:vlan)?)$"}
+]}
+yes_no_schema = {"type": "string", "enum": ["yes", "no"]}
+log_level_schema = {"type": "string", "enum":["DEBUG", "INFO", "WARNING","ERROR","CRITICAL"]}
 
 config_schema = {
     "title": "main configuration information schema",
@@ -765,7 +774,7 @@ of_port_new_schema = {
         "ofc_id": id_schema,
         "region": nameshort_schema,
         "compute_node": nameshort_schema,
-        "pci": pci_schema,
+        "pci": pci_extended_schema,
         "switch_dpid": nameshort_schema,
         "switch_port": nameshort_schema,
         "switch_mac": mac_schema
