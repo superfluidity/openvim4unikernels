@@ -3,7 +3,6 @@
 from setuptools import setup
 
 __name = 'osm_openvim'
-__version = open('OPENVIM_VERSION').read().strip()
 __description = 'OSM Openvim'
 __author = 'ETSI OSM'
 __author_email = 'alfonso.tiernosepulveda@telefonica.com'
@@ -13,7 +12,7 @@ __license = 'Apache 2.0'
 __url = 'https://osm.etsi.org/gitweb/?p=osm/openvim.git;a=summary'
 
 _req = [
-    "asn1crypto",
+    #"asn1crypto",
     "cffi",
     "enum34",
     "functools32",
@@ -34,7 +33,8 @@ _req = [
     "requestsexceptions",
     "netaddr",
     "bottle",
-    "MySQL-python",
+    #"MySQL-python",
+    #"mysqlclient",
     "paramiko",
     "libvirt-python",
     "pytest",
@@ -52,7 +52,7 @@ __scripts__ = ['openflow',
                'osm_openvim/scripts/get_dhcp_lease.sh']
 
 setup(name=__name,
-      version=__version,
+      version_command=('git describe', 'pep440-git'),
       description=__description,
       long_description=__description,
       author=__author,
@@ -69,7 +69,8 @@ setup(name=__name,
       data_files = [('/etc/osm/', ['osm_openvim/openvimd.cfg']),
                    ('/etc/systemd/system/', ['osm_openvim/osm-openvim.service']),
                    ],
-      install_requires=_req
+      install_requires=_req,
+      setup_requires=['setuptools-version-command'],
       )
 
 

@@ -3,7 +3,6 @@
 from setuptools import setup
 
 __name = 'lib_osm_openvim'
-__version = open('OVIM_VERSION').read().strip()
 __description = 'OSM Openvim library'
 __author = 'ETSI OSM'
 __author_email = 'alfonso.tiernosepulveda@telefonica.com'
@@ -13,7 +12,7 @@ __license = 'Apache 2.0'
 __url = 'https://osm.etsi.org/gitweb/?p=osm/openvim.git;a=summary'
 
 _req = [
-    "asn1crypto",
+    #"asn1crypto",
     "cffi",
     "enum34",
     "functools32",
@@ -34,14 +33,15 @@ _req = [
     "requestsexceptions",
     "netaddr",
     "bottle",
-    "MySQL-python",
+    #"MySQL-python",
+    #"mysqlclient",
     "paramiko"
 ]
 
 __scripts__ = ['openflow-lib']
 
 setup(name=__name,
-      version=__version,
+      version_command=('git describe', 'pep440-git'),
       description=__description,
       long_description=__description,
       author=__author,
@@ -55,7 +55,8 @@ setup(name=__name,
       scripts=__scripts__,
       package_data={'lib_osm_openvim': ['*']},
       include_package_data=True,
-      install_requires=_req
+      install_requires=_req,
+      setup_requires=['setuptools-version-command'],
       )
 
 
