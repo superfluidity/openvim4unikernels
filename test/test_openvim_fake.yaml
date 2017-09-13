@@ -1,0 +1,10 @@
+host:
+   host_1: test/hosts/host-example0.yaml
+   host_2: test/hosts/host-example1.yaml
+tenant: test/tenants/test_tenant.yaml
+flavor: test/flavors/cirros_flavor.yaml
+image: test/images/cirros_image.yaml
+server: test/servers/cirros_server_template.yaml
+net: test/networks/net-example5.yaml
+fake_mode: False
+create_inf: True

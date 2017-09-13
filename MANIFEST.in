@@ -1,5 +1,5 @@
 include README.rst
-include OPENVIM_VERSION
+#include OPENVIM_VERSION
 include openflow
 include openvimd
 include openvim

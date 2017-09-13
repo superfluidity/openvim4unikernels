@@ -1,25 +1,36 @@
 #!/usr/bin/env bash
+.PHONY: all test clean
+
 SHELL := /bin/bash
 
-all: clean build pip install
-lite: clean build_lite pip_lite install_lite
+all:
+	$(MAKE) clean_build build
+	$(MAKE) clean_build openvim
+	$(MAKE) clean_build build_lite
+	$(MAKE) clean_build lite
 
-clean_deb:
+openvim: package_openvim
+
+lite: package_lib_openvim
+
+clean: clean_build
 	rm -rf .build
-clean:
+
+clean_build:
 	rm -rf build
 	find osm_openvim -name '*.pyc' -delete
 	find osm_openvim -name '*.pyo' -delete
 
 prepare_lite:
-	pip install --user --upgrade setuptools
+	#pip install --user --upgrade setuptools
 	mkdir -p build
-	VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
-	VER2=$(shell git describe | cut -d- -f2); \
-	VER3=$(shell git describe | cut -d- -f3); \
-	echo "$$VER1.dev$$VER2+$$VER3" > build/OVIM_VERSION
+	#VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
+	#VER2=$(shell git describe | cut -d- -f2); \
+	#VER3=$(shell git describe | cut -d- -f3); \
+	#echo "$$VER1.dev$$VER2+$$VER3" > build/OVIM_VERSION
+	cp tox.ini build/
 	cp MANIFEST.in build/
-	sed -i "s/include OPENVIM_VERSION/include OVIM_VERSION/g" build/MANIFEST.in
+	#sed -i "s/include OPENVIM_VERSION/include OVIM_VERSION/g" build/MANIFEST.in
 	sed -i "s/recursive-include osm_openvim/recursive-include lib_osm_openvim/g" build/MANIFEST.in
 	sed -i "s/include openflow/include openflow-lib/g" build/MANIFEST.in
 	sed -i '/include openvimd/d' build/MANIFEST.in
@@ -39,12 +50,13 @@ prepare_lite:
 	sed -i "s/__import__(\"osm_openvim\.\"/__import__(\"lib_osm_openvim\.\"/g" build/lib_osm_openvim/ovim.py
 
 prepare:
-	pip install --user --upgrade setuptools
+	#pip install --user --upgrade setuptools
 	mkdir -p build
-	VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
-	VER2=$(shell git describe | cut -d- -f2); \
-	VER3=$(shell git describe | cut -d- -f3); \
-	echo "$$VER1.dev$$VER2+$$VER3" > build/OPENVIM_VERSION
+	#VER1=$(shell git describe | sed -e 's/^v//' |cut -d- -f1); \
+	#VER2=$(shell git describe | cut -d- -f2); \
+	#VER3=$(shell git describe | cut -d- -f3); \
+	#echo "$$VER1.dev$$VER2+$$VER3" > build/OPENVIM_VERSION
+	cp tox.ini build/
 	cp MANIFEST.in build/
 	cp README.rst build/
 	cp setup.py build/
@@ -61,17 +73,19 @@ prepare:
 
 build: prepare
 	python -m py_compile build/osm_openvim/*.py
+	#cd build && tox -e flake8
 
 build_lite: prepare_lite
 	python -m py_compile build/lib_osm_openvim/*.py
+	#cd build && tox -e flake8
 
-pip: clean build
+pip: build
 	cd build && ./setup.py sdist
 
-pip_lite: clean build_lite
+pip_lite: build_lite
 	cd build && ./setup.py sdist
 
-package_openvim: clean prepare
+package_openvim: prepare
 	#apt-get install -y python-stdeb
 	cd build && python setup.py --command-packages=stdeb.command sdist_dsc --with-python2=True
 	cd build && cp osm_openvim/scripts/python-osm-openvim.postinst deb_dist/osm-openvim*/debian/
@@ -79,14 +93,13 @@ package_openvim: clean prepare
 	mkdir -p .build
 	cp build/deb_dist/python-*.deb .build/
 
-package_lib: clean prepare_lite
+package_lib_openvim: prepare_lite
 	#apt-get install -y python-stdeb
-	cd build && python setup.py --command-packages=stdeb.command sdist_dsc --with-python2=True
-	cd build/deb_dist/lib-osm-openvim* && dpkg-buildpackage -rfakeroot -uc -us
+	#cd build && python setup.py --command-packages=stdeb.command sdist_dsc --with-python2=True
+	#cd build/deb_dist/lib-osm-openvim* && dpkg-buildpackage -rfakeroot -uc -us
+	cd build && python setup.py --command-packages=stdeb.command bdist_deb
 	mkdir -p .build
 	cp build/deb_dist/python-*.deb .build/
-
-package: clean_deb package_openvim package_lib
 
 snap:
 	echo "Nothing to be done yet"

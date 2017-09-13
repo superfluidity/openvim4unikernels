@@ -1,0 +1,35 @@
+##
+# Copyright 2015 Telefónica Investigación y Desarrollo, S.A.U.
+# This file is part of openvim
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+##
+
+server:
+    name:         vm-test        # name
+    description:  vm-cirros  # Optional user description
+    imageRef:     $OPENVIM_TEST_IMAGE
+    flavorRef:    $OPENVIM_TEST_FLAVOR
+    networks:  # List of control plane interfaces, Optional
+    -   name:     mgmt         #friendly user name
+        #vpci:     "0000:00:0a.0" #Optional guess PCI
+        uuid:     $OPENVIM_TEST_MGMT_NET
+        #mac_address:  #guess concrete mac address, by default one is asigned
+        #model:        "virtio","e1000","ne2k_pci","pcnet","rtl8139", By default auto, normally virtio
+    start:    "yes"    # "yes","no","paused".  By default it is started upon creted
+    hostId:   $HOST_ID
+   
+    # allocating EXCLUSIVE resoureces in the same NUMA node. 
+    # If provided, it overrides extended values at flavor
