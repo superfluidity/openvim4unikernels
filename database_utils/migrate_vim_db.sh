@@ -33,7 +33,7 @@ DBPORT="3306"
 DBNAME="vim_db"
 QUIET_MODE=""
 #TODO update it with the last database version
-LAST_DB_VERSION=21
+LAST_DB_VERSION=22
 
 # Detect paths
 MYSQL=$(which mysql)
@@ -189,6 +189,7 @@ fi
 #[ $OPENVIM_VER_NUM -ge 5015 ] && DATABASE_TARGET_VER_NUM=19  #0.5.15  => 19
 #[ $OPENVIM_VER_NUM -ge 5017 ] && DATABASE_TARGET_VER_NUM=20   #0.5.17  => 20
 #[ $OPENVIM_VER_NUM -ge 5018 ] && DATABASE_TARGET_VER_NUM=21   #0.5.18  => 21
+#[ $OPENVIM_VER_NUM -ge 5021 ] && DATABASE_TARGET_VER_NUM=22   #0.5.21  => 22
 # TODO ... put next versions here
 
 function upgrade_to_1(){
@@ -717,6 +718,19 @@ function downgrade_from_21(){
     echo "    Delete 'routes', 'links' and 'dns' to 'nets'"
     echo "ALTER TABLE nets DROP COLUMN dns, DROP COLUMN links, DROP COLUMN routes;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
     echo "DELETE FROM schema_version WHERE version_int = '21';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function upgrade_to_22(){
+    echo "    Changed type of ram in 'flavors' from SMALLINT to MEDIUMINT"
+    echo "ALTER TABLE flavors CHANGE COLUMN ram ram MEDIUMINT(7) UNSIGNED NULL DEFAULT NULL AFTER disk;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "INSERT INTO schema_version (version_int, version, openvim_ver, comments, date) VALUES (22, '0.22', '0.5.21', 'Changed type of ram in flavors from SMALLINT to MEDIUMINT', '2017-11-14');"\
+         | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+}
+
+function downgrade_from_22(){
+    echo "    Changed type of ram in 'flavors' from MEDIUMINT to SMALLINT"
+    echo "ALTER TABLE flavors CHANGE COLUMN ram ram SMALLINT(5) UNSIGNED NULL DEFAULT NULL AFTER disk;" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
+    echo "DELETE FROM schema_version WHERE version_int = '22';" | $DBCMD || ! echo "ERROR. Aborted!" || exit -1
 }
 
 
