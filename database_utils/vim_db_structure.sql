@@ -19,11 +19,11 @@
 * contact with: nfvlabs@tid.es
 **/
 
--- MySQL dump 10.13  Distrib 5.7.17, for Linux (x86_64)
+-- MySQL dump 10.13  Distrib 5.7.20, for Linux (x86_64)
 --
 -- Host: localhost    Database: {{vim_db}}
 -- ------------------------------------------------------
--- Server version	5.7.17-0ubuntu0.16.04.1
+-- Server version	5.7.20-0ubuntu0.16.04.1
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -58,7 +58,7 @@ CREATE TABLE `flavors` (
   `name` varchar(255) NOT NULL,
   `description` varchar(255) DEFAULT NULL,
   `disk` smallint(5) unsigned DEFAULT NULL,
-  `ram` smallint(5) unsigned DEFAULT NULL,
+  `ram` mediumint(7) unsigned DEFAULT NULL,
   `vcpus` smallint(5) unsigned DEFAULT NULL,
   `extended` varchar(2000) DEFAULT NULL COMMENT 'Extra description yaml format of needed resources and pining, orginized in sets per numa',
   `public` enum('yes','no') NOT NULL DEFAULT 'no',
@@ -104,6 +104,7 @@ CREATE TABLE `hosts` (
   `features` varchar(255) DEFAULT NULL,
   `user` varchar(64) NOT NULL,
   `password` varchar(64) DEFAULT NULL,
+  `keyfile` varchar(255) DEFAULT NULL,
   `admin_state_up` enum('true','false') NOT NULL DEFAULT 'true',
   `RAM` mediumint(8) unsigned NOT NULL DEFAULT '0' COMMENT 'Host memory in MB not used as hugepages',
   `cpus` smallint(5) unsigned NOT NULL DEFAULT '0' COMMENT 'Host threads(or cores) not isolated from OS',
@@ -151,6 +152,7 @@ CREATE TABLE `instance_devices` (
   `image_id` varchar(36) DEFAULT NULL COMMENT 'Used in case type is disk',
   `vpci` char(12) DEFAULT NULL COMMENT 'format XXXX:XX:XX.X',
   `dev` varchar(12) DEFAULT NULL,
+  `image_size` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `FK_instance_devices_instances` (`instance_id`),
   KEY `FK_instance_devices_images` (`image_id`),
@@ -228,6 +230,7 @@ CREATE TABLE `nets` (
   `name` varchar(255) NOT NULL,
   `shared` enum('true','false') NOT NULL DEFAULT 'false',
   `admin_state_up` enum('true','false') NOT NULL DEFAULT 'true',
+  `region` varchar(64) DEFAULT NULL,
   `vlan` smallint(6) DEFAULT NULL,
   `provider` varchar(36) DEFAULT NULL,
   `bind_net` varchar(36) DEFAULT NULL COMMENT 'To connect with other net',
@@ -237,9 +240,12 @@ CREATE TABLE `nets` (
   `dhcp_first_ip` varchar(64) DEFAULT NULL,
   `dhcp_last_ip` varchar(64) DEFAULT NULL,
   `gateway_ip` varchar(64) DEFAULT NULL,
+  `dns` varchar(255) DEFAULT NULL,
+  `links` text,
+  `routes` text,
   PRIMARY KEY (`uuid`),
-  UNIQUE KEY `type_vlan` (`type`,`vlan`),
   UNIQUE KEY `physical` (`provider`),
+  UNIQUE KEY `region_vlan` (`region`,`vlan`),
   KEY `FK_nets_tenants` (`tenant_id`),
   CONSTRAINT `FK_nets_tenants` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
@@ -978,17 +984,17 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2017-04-28 14:12:17
+-- Dump completed on 2017-11-23 10:32:25
 
 
 
 
 
--- MySQL dump 10.13  Distrib 5.7.17, for Linux (x86_64)
+-- MySQL dump 10.13  Distrib 5.7.20, for Linux (x86_64)
 --
 -- Host: localhost    Database: {{vim_db}}
 -- ------------------------------------------------------
--- Server version	5.7.17-0ubuntu0.16.04.1
+-- Server version	5.7.20-0ubuntu0.16.04.1
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -1007,7 +1013,7 @@ DELIMITER ;
 
 LOCK TABLES `schema_version` WRITE;
 /*!40000 ALTER TABLE `schema_version` DISABLE KEYS */;
-INSERT INTO `schema_version` VALUES (1,'0.1','0.2.00','insert schema_version; alter nets with last_error column','2015-05-05'),(2,'0.2','0.2.03','update Procedure UpdateSwitchPort','2015-05-06'),(3,'0.3','0.2.5','New Procedure GetAllAvailablePorts','2015-07-09'),(4,'0.4','0.3.1','Remove unique index VLAN at resources_port','2015-09-04'),(5,'0.5','0.4.1','Add ip_address to ports','2015-09-04'),(6,'0.6','0.4.2','Enlarging name at database','2016-02-01'),(7,'0.7','0.4.4','Add bind_net to net table','2016-02-12'),(8,'0.8','0.4.10','add column checksum to images','2016-09-30'),(9,'0.9','0.5.1','increase length of columns path and name to 255 in table images, and change length of column name to 255 in table flavors','2017-01-10'),(10,'0.10','0.5.2','change ports type, adding instance:ovs','2017-02-01'),(11,'0.11','0.5.4','Add gateway_ip colum to nets','2017-02-13'),(12,'0.12','0.5.5','Add of_controller table','2017-02-17'),(13,'0.13','0.5.6','Add of_port_mapings table','2017-03-09'),(14,'0.14','0.5.7','Add switch_mac, ofc_id colum to ports and resources_port tables','2017-03-09'),(15,'0.15','0.5.8','Add ofc_id colum to of_flows','2017-03-15'),(16,'0.16','0.5.9','Add last_error and status colum to ofcs','2017-03-17'),(17,'0.17','0.5.10','Add pci to unique index dpid port/mac at of_port_mappings','2017-04-05');
+INSERT INTO `schema_version` VALUES (1,'0.1','0.2.00','insert schema_version; alter nets with last_error column','2015-05-05'),(2,'0.2','0.2.03','update Procedure UpdateSwitchPort','2015-05-06'),(3,'0.3','0.2.5','New Procedure GetAllAvailablePorts','2015-07-09'),(4,'0.4','0.3.1','Remove unique index VLAN at resources_port','2015-09-04'),(5,'0.5','0.4.1','Add ip_address to ports','2015-09-04'),(6,'0.6','0.4.2','Enlarging name at database','2016-02-01'),(7,'0.7','0.4.4','Add bind_net to net table','2016-02-12'),(8,'0.8','0.4.10','add column checksum to images','2016-09-30'),(9,'0.9','0.5.1','increase length of columns path and name to 255 in table images, and change length of column name to 255 in table flavors','2017-01-10'),(10,'0.10','0.5.2','change ports type, adding instance:ovs','2017-02-01'),(11,'0.11','0.5.4','Add gateway_ip colum to nets','2017-02-13'),(12,'0.12','0.5.5','Add of_controller table','2017-02-17'),(13,'0.13','0.5.6','Add of_port_mapings table','2017-03-09'),(14,'0.14','0.5.7','Add switch_mac, ofc_id colum to ports and resources_port tables','2017-03-09'),(15,'0.15','0.5.8','Add ofc_id colum to of_flows','2017-03-15'),(16,'0.16','0.5.9','Add last_error and status colum to ofcs','2017-03-17'),(17,'0.17','0.5.10','Add pci to unique index dpid port/mac at of_port_mappings','2017-04-05'),(18,'0.18','0.5.13','Add region to nets, change vlan unique index','2017-05-03'),(19,'0.19','0.5.15','Add keyfile to hosts','2017-05-23'),(20,'0.20','0.5.17','Add image_size to instance_devices','2017-06-01'),(21,'0.21','0.5.18','Add routes, links and dns to inets','2017-06-21'),(22,'0.22','0.5.21','Changed type of ram in flavors from SMALLINT to MEDIUMINT','2017-11-14');
 /*!40000 ALTER TABLE `schema_version` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -1020,4 +1026,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2017-04-28 14:12:17
+-- Dump completed on 2017-11-23 10:32:25
