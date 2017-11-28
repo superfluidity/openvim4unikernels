@@ -43,7 +43,7 @@ import openflow_conn
 
 __author__ = "Alfonso Tierno, Leonardo Mirabal"
 __date__ = "$06-Feb-2017 12:07:15$"
-__version__ = "0.5.21-r537"
+__version__ = "0.5.22-r538"
 version_date = "Nov 2017"
 database_version = 22      #needed database schema version
 
@@ -661,7 +661,7 @@ class ovim():
         network['vlan'] = net_vlan
         network['region'] = net_region
         dhcp_integrity = True
-        if 'enable_dhcp' in network and network['enable_dhcp']:
+        if network.get('enable_dhcp'):
             dhcp_integrity = self._check_dhcp_data_integrity(network)
         
         if network.get('links'):
@@ -672,10 +672,10 @@ class ovim():
             network['routes'] = yaml.safe_dump(network['routes'], default_flow_style=True, width=256)
 
         result, content = self.db.new_row('nets', network, True, True)
-        if result >= 0 and dhcp_integrity:
+        if result >= 0:  # and dhcp_integrity:
             if bridge_net:
                 bridge_net[3] = content
-            if self.config.get("dhcp_server") and self.config['network_type'] == 'bridge': # \
+            if self.config.get("dhcp_server") and self.config['network_type'] == 'bridge':
                 if network["name"] in self.config["dhcp_server"].get("nets", ()):
                     self.config["dhcp_nets"].append(content)
                     self.logger.debug("dhcp_server: add new net", content)
@@ -684,7 +684,8 @@ class ovim():
                     self.logger.debug("dhcp_server: add new net", content, content)
             return content
         else:
-            raise ovimException("Error posting network", HTTP_Internal_Server_Error)
+            raise ovimException("Error creating network: {}".format(content), -result)
+
 # TODO kei change update->edit
 
     def edit_network(self, network_id, network):
