@@ -50,7 +50,8 @@ class host_thread(threading.Thread):
     lvirt_module = None
 
     def __init__(self, name, host, user, db, db_lock, test, image_path, host_id, version, develop_mode,
-                 develop_bridge_iface, password=None, keyfile = None, logger_name=None, debug=None):
+                 develop_bridge_iface, task_queue_sleep_time, libvirt_conn_mode, hypervisors=None,
+                 password=None, keyfile = None, logger_name=None, debug=None): #CLICKOS MOD
         """Init a thread to communicate with compute node or ovs_controller.
         :param host_id: host identity
         :param name: name of the thread
@@ -99,18 +100,36 @@ class host_thread(threading.Thread):
         self.pending_terminate_server =[] #list  with pairs (time,server_uuid) time to send a terminate for a server being destroyed
         self.next_update_server_status = 0 #time when must be check servers status
         
+        self.hypervisor = "kvm" #hypervisor flag: for switch from kvm to xen #CLICKOS MOD
+        if hypervisors:                      #CLICKOS MOD
+            self.hypervisors = hypervisors   #CLICKOS MOD
+        else:                                #CLICKOS MOD
+            self.hypervisors = "kvm"         #CLICKOS MOD
+
+        self.xen_hyp = True if "xen" in self.hypervisors else False  #CLICKOS MOD
+
         self.hostinfo = None 
         
         self.queueLock = threading.Lock()
         self.taskQueue = Queue.Queue(2000)
+        self.taskQueue_sleepTime = task_queue_sleep_time  #CLICKOS MOD
+        self.libvirt_connMode = libvirt_conn_mode         #CLICKOS MOD
         self.ssh_conn = None
         self.run_command_session = None
         self.error = None
         self.localhost = True if host == 'localhost' else False
-        self.lvirt_conn_uri = "qemu+ssh://{user}@{host}/system?no_tty=1&no_verify=1".format(
-            user=self.user, host=self.host)
-        if keyfile:
-            self.lvirt_conn_uri += "&keyfile=" + keyfile
+
+        if self.xen_hyp:              #CLICKOS MOD
+            if self.libvirt_connMode == "tcp":         #CLICKOS MOD
+                self.lvirt_conn_uri = "xen+tcp://{host}/".format(host=self.host) #CLICKOS MOD
+            else:     #CLICKOS MOD
+                self.lvirt_conn_uri = "xen+ssh://{user}@{host}/".format(user=self.user, host=self.host) #CLICKOS MOD
+        else:         #CLICKOS MOD
+            self.lvirt_conn_uri = "qemu+ssh://{user}@{host}/system?no_tty=1&no_verify=1".format(
+                user=self.user, host=self.host)
+            if keyfile:
+                self.lvirt_conn_uri += "&keyfile=" + keyfile
+
         self.remote_ip = None
         self.local_ip = None
 
@@ -347,6 +366,27 @@ class host_thread(threading.Thread):
                         self.logger.error("Exception deleting file '%s': %s", localfile['source file'], str(e))
                 del self.localinfo['server_files'][uuid]
                 self.localinfo_dirty = True
+
+    def delete_unused_ovs_bridge(self): #CLICKOS MOD
+        '''
+        Search openvswitch networks without any port configured and remove them
+        '''
+        # obtain data
+        db_filter = {'provider': 'ovsbr%', 'type': 'bridge_%'}
+        result, content = self.db.get_table(FROM='nets', WHERE_LIKE=db_filter, LIMIT=100)
+
+        if result < 0:
+            raise ovimException(str(content), -result)
+        elif result == 0:
+            return
+            #raise ovimException("show_network network '%s' not found" % network_id, -result)
+        else:
+            for net in content:
+                # get ports from DB
+                result, ports = self.db.get_table(FROM='ports', SELECT=('uuid as port_id',),
+                                                  WHERE={'net_id': net['uuid']}, LIMIT=100)
+                if len(ports) == 0:
+                    self.delete_ovs_bridge("ovim-" + net['name'])
    
     def insert_task(self, task, *aditional):
         try:
@@ -363,6 +403,8 @@ class host_thread(threading.Thread):
             self.load_hostinfo()
             self.load_servers_from_db()
             self.delete_unused_files()
+            if self.xen_hyp:     #CLICKOS MOD
+                self.delete_unused_ovs_bridge()  #CLICKOS MOD
             while True:
                 try:
                     self.queueLock.acquire()
@@ -382,7 +424,8 @@ class host_thread(threading.Thread):
                         elif len(self.pending_terminate_server)>0 and self.pending_terminate_server[0][0]<now:
                             self.server_forceoff()
                         else:
-                            time.sleep(1)
+                            #time.sleep(1) #CLICKOS MOD
+                            time.sleep(self.taskQueue_sleepTime/1000.0)   #CLICKOS MOD
                         continue
 
                     if task[0] == 'instance':
@@ -759,6 +802,512 @@ class host_thread(threading.Thread):
         text += self.dec_tab()+'</devices>'+\
         self.dec_tab()+'</domain>'
         return 0, text
+
+    def create_xml_xen_server(self, server, dev_list, server_metadata={}):  #CLICKOS MOD
+        """Function that implements the generation of the VM XML definition.
+        Additional devices are in dev_list list
+        The main disk is upon dev_list[0]"""
+
+    #get if operating system is Windows
+        windows_os = False
+        os_type = server_metadata.get('os_type', None)
+        if os_type == None and 'metadata' in dev_list[0]:
+            os_type = dev_list[0]['metadata'].get('os_type', None)
+        if os_type != None and os_type.lower() == "windows":
+            windows_os = True
+    #get type of hard disk bus
+        bus_ide = True if windows_os else False
+        bus = server_metadata.get('bus', None)
+        if bus == None and 'metadata' in dev_list[0]:
+            bus = dev_list[0]['metadata'].get('bus', None)
+        if bus != None:
+            bus_ide = True if bus=='ide' else False
+
+        self.xml_level = 0
+
+        text = "<domain type='xen'>"
+    #get topology
+        topo = server_metadata.get('topology', None)
+        if topo == None and 'metadata' in dev_list[0]:
+            topo = dev_list[0]['metadata'].get('topology', None)
+    #name
+        name = server.get('name','') + "_" + server['uuid']
+        name = name[:58]  #qemu impose a length  limit of 59 chars or not start. Using 58
+        text += self.inc_tab() + "<name>" + name+ "</name>"
+    #uuid
+        text += self.tab() + "<uuid>" + server['uuid'] + "</uuid>"
+
+        numa={}
+        if 'extended' in server and server['extended']!=None and 'numas' in server['extended']:
+            numa = server['extended']['numas'][0]
+    #memory
+        use_huge = False
+        memory = int(numa.get('memory',0))*1024*1024 #in KiB
+        if memory==0:
+            memory = int(server['ram'])*1024;
+        else:
+            if not self.develop_mode:
+                use_huge = True
+        if memory==0:
+            return -1, 'No memory assigned to instance'
+        memory = str(memory)
+        text += self.tab() + "<memory unit='KiB'>" +memory+"</memory>"
+        text += self.tab() + "<currentMemory unit='KiB'>" +memory+ "</currentMemory>"
+        if use_huge:
+            text += self.tab()+'<memoryBacking>'+ \
+                self.inc_tab() + '<hugepages/>'+ \
+                self.dec_tab()+ '</memoryBacking>'
+
+    #cpu
+        use_cpu_pinning=False
+        vcpus = int(server.get("vcpus",0))
+        cpu_pinning = []
+        if 'cores-source' in numa:
+            use_cpu_pinning=True
+            for index in range(0, len(numa['cores-source'])):
+                cpu_pinning.append( [ numa['cores-id'][index], numa['cores-source'][index] ] )
+                vcpus += 1
+        if 'threads-source' in numa:
+            use_cpu_pinning=True
+            for index in range(0, len(numa['threads-source'])):
+                cpu_pinning.append( [ numa['threads-id'][index], numa['threads-source'][index] ] )
+                vcpus += 1
+        if 'paired-threads-source' in numa:
+            use_cpu_pinning=True
+            for index in range(0, len(numa['paired-threads-source'])):
+                cpu_pinning.append( [numa['paired-threads-id'][index][0], numa['paired-threads-source'][index][0] ] )
+                cpu_pinning.append( [numa['paired-threads-id'][index][1], numa['paired-threads-source'][index][1] ] )
+                vcpus += 2
+
+        if use_cpu_pinning and not self.develop_mode:
+            text += self.tab()+"<vcpu placement='static'>" +str(len(cpu_pinning)) +"</vcpu>" + \
+                self.tab()+'<cputune>'
+            self.xml_level += 1
+            for i in range(0, len(cpu_pinning)):
+                text += self.tab() + "<vcpupin vcpu='" +str(cpu_pinning[i][0])+ "' cpuset='" +str(cpu_pinning[i][1]) +"'/>"
+            text += self.dec_tab()+'</cputune>'+ \
+                self.tab() + '<numatune>' +\
+                self.inc_tab() + "<memory mode='strict' nodeset='" +str(numa['source'])+ "'/>" +\
+                self.dec_tab() + '</numatune>'
+        else:
+            if vcpus==0:
+                return -1, "Instance without number of cpus"
+            text += self.tab()+"<vcpu>" + str(vcpus)  + "</vcpu>"
+
+    #boot
+        boot_cdrom = False
+        for dev in dev_list:
+            if dev['type']=='cdrom' :
+                boot_cdrom = True
+                break
+        text += self.tab()+ '<os>' + \
+            self.inc_tab() + "<type arch='x86_64' machine='xenfv'>hvm</type>"
+        text +=  self.tab() + "<loader type='rom'>/usr/lib/xen/boot/hvmloader</loader>"
+        if boot_cdrom:
+            text +=  self.tab() + "<boot dev='cdrom'/>"
+        text +=  self.tab() + "<boot dev='hd'/>" + \
+            self.dec_tab()+'</os>'
+    #features
+        text += self.tab()+'<features>'+\
+            self.inc_tab()+'<acpi/>' +\
+            self.tab()+'<apic/>' +\
+            self.tab()+'<pae/>'+ \
+            self.dec_tab() +'</features>'
+        if topo == "oneSocket:hyperthreading":
+            if vcpus % 2 != 0:
+                return -1, 'Cannot expose hyperthreading with an odd number of vcpus'
+            text += self.tab() + "<cpu mode='host-model'> <topology sockets='1' cores='%d' threads='2' /> </cpu>" % vcpus/2
+        elif windows_os or topo == "oneSocket":
+            text += self.tab() + "<cpu mode='host-model'> <topology sockets='1' cores='%d' threads='1' /> </cpu>" % vcpus
+        else:
+            text += self.tab() + "<cpu mode='host-model'></cpu>"
+        text += self.tab() + "<clock offset='utc'/>" +\
+            self.tab() + "<on_poweroff>destroy</on_poweroff>" + \
+            self.tab() + "<on_reboot>restart</on_reboot>" + \
+            self.tab() + "<on_crash>preserve</on_crash>"
+        text += self.tab() + "<devices>" + \
+            self.inc_tab() + "<emulator>/usr/lib64/xen/bin/qemu-dm</emulator>" + \
+            self.tab() + "<serial type='pty'>" +\
+            self.inc_tab() + "<target port='0'/>" + \
+            self.dec_tab() + "</serial>" +\
+            self.tab() + "<console type='pty'>" + \
+            self.inc_tab()+ "<target type='serial' port='0'/>" + \
+            self.dec_tab()+'</console>'
+        if windows_os:
+            text += self.tab() + "<controller type='usb' index='0'/>" + \
+                self.tab() + "<controller type='ide' index='0'/>" + \
+                self.tab() + "<input type='mouse' bus='ps2'/>" + \
+                self.tab() + "<sound model='ich6'/>" + \
+                self.tab() + "<video>" + \
+                self.inc_tab() + "<model type='cirrus' vram='9216' heads='1'/>" + \
+                self.dec_tab() + "</video>" + \
+                self.tab() + "<memballoon model='virtio'/>" + \
+                self.tab() + "<input type='tablet' bus='usb'/>" #TODO revisar
+        else:
+            text += self.tab() + "<controller type='ide' index='0'/>" + \
+                self.tab() + "<input type='mouse' bus='ps2'/>" + \
+                self.tab() + "<input type='keyboard' bus='ps2'/>" + \
+                self.tab() + "<video>" + \
+                self.inc_tab() + "<model type='cirrus' vram='9216' heads='1'/>" + \
+                self.dec_tab() + "</video>"
+
+#>             self.tab()+'<alias name=\'hostdev0\'/>\n' +\
+#>             self.dec_tab()+'</hostdev>\n' +\
+#>             self.tab()+'<input type=\'tablet\' bus=\'usb\'/>\n'
+        if windows_os:
+            text += self.tab() + "<graphics type='vnc' port='5900' autoport='yes'/>"
+        else:
+            #If image contains 'GRAPH' include graphics
+            #if 'GRAPH' in image:
+            text += self.tab() + "<graphics type='vnc' port='5900' autoport='yes' listen='0.0.0.0'>" +\
+                 self.inc_tab() + "<listen type='address' address='0.0.0.0'/>" +\
+                 self.dec_tab() + "</graphics>"
+
+        vd_index = 'a'
+        for dev in dev_list:
+            bus_ide_dev = bus_ide
+            if dev['type']=='cdrom' or dev['type']=='disk':
+                if dev['type']=='cdrom':
+                    bus_ide_dev = True
+                text += self.tab() + "<disk type='file' device='"+dev['type']+"'>"
+                if 'source file' in dev:
+                    text += self.tab() + "<source file='" +dev['source file']+ "'/>"
+                #elif v['type'] == 'block':
+                #    text += self.tab() + "<source dev='" + v['source'] + "'/>"
+                #else:
+                #    return -1, 'Unknown disk type ' + v['type']
+                vpci = dev.get('vpci',None)
+                if vpci == None:
+                    vpci = dev['metadata'].get('vpci',None)
+                text += self.pci2xml(vpci)
+
+                if bus_ide_dev:
+                    text += self.tab() + "<target dev='hd" +vd_index+ "' bus='ide'/>"   #TODO allows several type of disks
+                else:
+                    text += self.tab() + "<target dev='vd" +vd_index+ "' bus='virtio'/>"
+                text += self.dec_tab() + '</disk>'
+                vd_index = chr(ord(vd_index)+1)
+            elif dev['type']=='xml':
+                dev_text = dev['xml']
+                if 'vpci' in dev:
+                    dev_text = dev_text.replace('__vpci__', dev['vpci'])
+                if 'source file' in dev:
+                    dev_text = dev_text.replace('__file__', dev['source file'])
+                if 'file format' in dev:
+                    dev_text = dev_text.replace('__format__', dev['source file'])
+                if '__dev__' in dev_text:
+                    dev_text = dev_text.replace('__dev__', vd_index)
+                    vd_index = chr(ord(vd_index)+1)
+                text += dev_text
+            else:
+                return -1, 'Unknown device type ' + dev['type']
+
+    #networking: ManagementPlane network
+        net_nb=0
+        bridge_interfaces = server.get('networks', [])
+        for v in bridge_interfaces:
+            #Get the brifge name
+            self.db_lock.acquire()
+            result, content = self.db.get_table(FROM='nets', SELECT=('name', 'provider',),WHERE={'uuid':v['net_id']} ) #CLICKOS MOD
+            self.db_lock.release()
+            if result <= 0:
+                print "create_xml_server ERROR getting nets",result, content
+                return -1, content
+            #ALF: Allow by the moment the 'default' bridge net because is confortable for provide internet to VM
+            #I know it is not secure
+            #for v in sorted(desc['network interfaces'].itervalues()):
+            model = v.get("model", None)
+            if content[0]['provider']=='default':
+                text += self.tab() + "<interface type='network'>" + \
+                    self.inc_tab() + "<source network='" +content[0]['provider']+ "'/>"
+            elif content[0]['provider'][0:7]=='macvtap':
+                text += self.tab()+"<interface type='direct'>" + \
+                    self.inc_tab() + "<source dev='" + self.get_local_iface_name(content[0]['provider'][8:]) + "' mode='bridge'/>" + \
+                    self.tab() + "<target dev='macvtap0'/>"
+                if windows_os:
+                    text += self.tab() + "<alias name='net" + str(net_nb) + "'/>"
+                elif model==None:
+                    model = "virtio"
+            elif content[0]['provider'][0:6]=='bridge':
+                text += self.tab() + "<interface type='bridge'>" +  \
+                    self.inc_tab()+"<source bridge='" +self.get_local_iface_name(content[0]['provider'][7:])+ "'/>"
+                if windows_os:
+                    text += self.tab() + "<target dev='vnet" + str(net_nb)+ "'/>" +\
+                        self.tab() + "<alias name='net" + str(net_nb)+ "'/>"
+                elif model==None:
+                    model = "virtio"
+            elif content[0]['provider'][0:3] == "OVS":
+                 vlan = content[0]['provider'].replace('OVS:', '')
+                 text += self.tab() + "<interface type='bridge'>" + \
+                         self.inc_tab() + "<source bridge='ovim-" + str(vlan) + "'/>"
+            elif content[0]['provider'][:5] == "ovsbr":
+                netname = content[0]['provider'][6:]
+                text += self.tab() + "<interface type='bridge'>" + \
+                        self.inc_tab() + "<source bridge='ovim-" + netname + "'/>"
+                text += self.tab() + "<script path='vif-openvswitch'/>"
+            else:
+                return -1, 'Unknown Bridge net provider ' + content[0]['provider']
+            if model!=None:
+                text += self.tab() + "<model type='" +model+ "'/>"
+            if v.get('mac_address', None) != None:
+                text+= self.tab() +"<mac address='" +v['mac_address']+ "'/>"
+            text += self.pci2xml(v.get('vpci',None))
+            text += self.dec_tab()+'</interface>'
+
+            net_nb += 1
+
+        interfaces = numa.get('interfaces', [])
+
+        net_nb=0
+        for v in interfaces:
+            if self.develop_mode: #map these interfaces to bridges
+                text += self.tab() + "<interface type='bridge'>" +  \
+                    self.inc_tab()+"<source bridge='" +self.develop_bridge_iface+ "'/>"
+                if windows_os:
+                    text += self.tab() + "<target dev='vnet" + str(net_nb)+ "'/>" +\
+                        self.tab() + "<alias name='net" + str(net_nb)+ "'/>"
+                else:
+                    text += self.tab() + "<model type='e1000'/>" #e1000 is more probable to be supported than 'virtio'
+                if v.get('mac_address', None) != None:
+                    text+= self.tab() +"<mac address='" +v['mac_address']+ "'/>"
+                text += self.pci2xml(v.get('vpci',None))
+                text += self.dec_tab()+'</interface>'
+                continue
+
+            if v['dedicated'] == 'yes':  #passthrought
+                text += self.tab() + "<hostdev mode='subsystem' type='pci' managed='yes'>" + \
+                    self.inc_tab() + "<source>"
+                self.inc_tab()
+                text += self.pci2xml(v['source'])
+                text += self.dec_tab()+'</source>'
+                text += self.pci2xml(v.get('vpci',None))
+                if windows_os:
+                    text += self.tab() + "<alias name='hostdev" + str(net_nb) + "'/>"
+                text += self.dec_tab()+'</hostdev>'
+                net_nb += 1
+            else:        #sriov_interfaces
+                #skip not connected interfaces
+                if v.get("net_id") == None:
+                    continue
+                text += self.tab() + "<interface type='hostdev' managed='yes'>"
+                self.inc_tab()
+                if v.get('mac_address', None) != None:
+                    text+= self.tab() + "<mac address='" +v['mac_address']+ "'/>"
+                text+= self.tab()+'<source>'
+                self.inc_tab()
+                text += self.pci2xml(v['source'])
+                text += self.dec_tab()+'</source>'
+                if v.get('vlan',None) != None:
+                    text += self.tab() + "<vlan>   <tag id='" + str(v['vlan']) + "'/>   </vlan>"
+                text += self.pci2xml(v.get('vpci',None))
+                if windows_os:
+                    text += self.tab() + "<alias name='hostdev" + str(net_nb) + "'/>"
+                text += self.dec_tab()+'</interface>'
+
+
+        text += self.dec_tab()+'</devices>'+\
+        self.dec_tab()+'</domain>'
+        return 0, text
+
+    def create_xml_srv_clickos(self, server, dev_list, server_metadata={}):   #CLICKOS MOD
+        """Function that implements the generation of the VM XML definition.
+        This function is designed for specific boot of ClickOS image with Xen.
+        Additional devices are in dev_list list
+        The main disk is upon dev_list[0]"""
+
+    #get if operating system is Windows
+        windows_os = False
+    #get type of hard disk bus
+        bus_ide = False
+
+        self.xml_level = 0
+
+        text = "<domain type='xen'>"
+    #name
+        name = server.get('name','') + "_" + server['uuid']
+        name = name[:58]  #qemu impose a length  limit of 59 chars or not start. Using 58
+        text += self.inc_tab() + "<name>" + name+ "</name>"
+    #uuid
+        text += self.tab() + "<uuid>" + server['uuid'] + "</uuid>"
+
+        numa={}
+        if 'extended' in server and server['extended']!=None and 'numas' in server['extended']:
+            numa = server['extended']['numas'][0]
+    #memory
+        use_huge = False
+        memory = int(numa.get('memory',0))*1024*1024 #in KiB
+        if memory==0:
+            memory = int(server['ram'])*1024;
+        else:
+            if not self.develop_mode and not self.unikernel_mode:  #CLICKOS MOD
+                use_huge = True
+        if memory==0:
+            return -1, 'No memory assigned to instance'
+        memory = str(memory)
+        text += self.tab() + "<memory unit='KiB'>" +memory+"</memory>"
+        text += self.tab() + "<currentMemory unit='KiB'>" +memory+ "</currentMemory>"
+        if use_huge:
+            text += self.tab()+'<memoryBacking>'+ \
+                self.inc_tab() + '<hugepages/>'+ \
+                self.dec_tab()+ '</memoryBacking>'
+
+    #cpu
+        use_cpu_pinning=False
+        vcpus = int(server.get("vcpus",0))
+        cpu_pinning = []
+        if 'cores-source' in numa:
+            use_cpu_pinning=True
+            for index in range(0, len(numa['cores-source'])):
+                cpu_pinning.append( [ numa['cores-id'][index], numa['cores-source'][index] ] )
+                vcpus += 1
+        if 'threads-source' in numa:
+            use_cpu_pinning=True
+            for index in range(0, len(numa['threads-source'])):
+                cpu_pinning.append( [ numa['threads-id'][index], numa['threads-source'][index] ] )
+                vcpus += 1
+        if 'paired-threads-source' in numa:
+            use_cpu_pinning=True
+            for index in range(0, len(numa['paired-threads-source'])):
+                cpu_pinning.append( [numa['paired-threads-id'][index][0], numa['paired-threads-source'][index][0] ] )
+                cpu_pinning.append( [numa['paired-threads-id'][index][1], numa['paired-threads-source'][index][1] ] )
+                vcpus += 2
+
+        if use_cpu_pinning and not self.develop_mode and not self.unikernel_mode:
+            text += self.tab()+"<vcpu placement='static'>" +str(len(cpu_pinning)) +"</vcpu>" + \
+                self.tab()+'<cputune>'
+            self.xml_level += 1
+            for i in range(0, len(cpu_pinning)):
+                text += self.tab() + "<vcpupin vcpu='" +str(cpu_pinning[i][0])+ "' cpuset='" +str(cpu_pinning[i][1]) +"'/>"
+            text += self.dec_tab()+'</cputune>'+ \
+                self.tab() + '<numatune>' +\
+                self.inc_tab() + "<memory mode='strict' nodeset='" +str(numa['source'])+ "'/>" +\
+                self.dec_tab() + '</numatune>'
+        else:
+            if vcpus==0:
+                return -1, "Instance without number of cpus"
+            text += self.tab()+"<vcpu>" + str(vcpus)  + "</vcpu>"
+
+    #boot
+        text += self.tab()+ '<os>' + \
+            self.inc_tab() + "<type arch='x86_64' machine='xenpv'>xen</type>"
+        text +=  self.tab() + "<kernel>" + str(dev_list[0]['source file']) + "</kernel>" + \
+            self.dec_tab()+'</os>'
+    #features
+        text += self.tab()+'<features>'+\
+            self.inc_tab()+'<acpi/>' +\
+            self.tab()+'<apic/>' +\
+            self.tab()+'<pae/>'+ \
+            self.dec_tab() +'</features>'
+        #if windows_os:
+        #    text += self.tab() + "<cpu mode='host-model'> <topology sockets='1' cores='%d' threads='1' /> </cpu>"% vcpus
+        #else:
+        text += self.tab() + "<cpu mode='host-model'></cpu>"
+        text += self.tab() + "<clock offset='utc'/>" +\
+            self.tab() + "<on_poweroff>destroy</on_poweroff>" + \
+            self.tab() + "<on_reboot>restart</on_reboot>" + \
+            self.tab() + "<on_crash>destroy</on_crash>"
+        text += self.tab() + "<devices>" + \
+            self.tab() + "<console type='pty'>" + \
+            self.inc_tab()+ "<target type='xen' port='0'/>" + \
+            self.dec_tab()+'</console>'
+
+    #networking: ManagementPlane network
+        net_nb=0
+        bridge_interfaces = server.get('networks', [])
+        for v in bridge_interfaces:
+            #Get the brifge name
+            self.db_lock.acquire()
+            result, content = self.db.get_table(FROM='nets', SELECT=('name', 'provider',),WHERE={'uuid':v['net_id']} ) #CLICKOS MOD
+            self.db_lock.release()
+            if result <= 0:
+                print "create_xml_server ERROR getting nets",result, content
+                return -1, content
+            print str(content), "\n\n"
+            #ALF: Allow by the moment the 'default' bridge net because is confortable for provide internet to VM
+            #I know it is not secure
+            #for v in sorted(desc['network interfaces'].itervalues()):
+            model = v.get("model", None)
+            if content[0]['provider']=='default':
+                text += self.tab() + "<interface type='network'>" + \
+                    self.inc_tab() + "<source network='" +content[0]['provider']+ "'/>"
+            elif content[0]['provider'][0:7]=='macvtap':
+                text += self.tab()+"<interface type='direct'>" + \
+                    self.inc_tab() + "<source dev='" + self.get_local_iface_name(content[0]['provider'][8:]) + "' mode='bridge'/>" + \
+                    self.tab() + "<target dev='macvtap0'/>"
+            elif content[0]['provider'][0:6]=='bridge':
+                text += self.tab() + "<interface type='bridge'>" + \
+                    self.inc_tab()+"<source bridge='" +self.get_local_iface_name(content[0]['provider'][7:])+ "'/>"
+            elif content[0]['provider'][0:3] == "OVS":
+                vlan = content[0]['provider'].replace('OVS:', '')
+                text += self.tab() + "<interface type='bridge'>" + \
+                        self.inc_tab() + "<source bridge='ovim-" + str(vlan) + "'/>"
+            elif content[0]['provider'][:5] == "ovsbr":
+                netname = content[0]['provider'][6:]
+                text += self.tab() + "<interface type='bridge'>" + \
+                        self.inc_tab() + "<source bridge='ovim-" + netname + "'/>"
+                text += self.tab() + "<script path='vif-openvswitch'/>"
+            else:
+                return -1, 'Unknown Bridge net provider ' + content[0]['provider']
+            if model!=None:
+                text += self.tab() + "<model type='" +model+ "'/>"
+            if v.get('mac_address', None) != None:
+                text+= self.tab() +"<mac address='" +v['mac_address']+ "'/>"
+            text += self.pci2xml(v.get('vpci',None))
+            text += self.dec_tab()+'</interface>'
+
+            net_nb += 1
+
+        interfaces = numa.get('interfaces', [])
+
+        net_nb=0
+        for v in interfaces:
+            if self.develop_mode: #map these interfaces to bridges
+                text += self.tab() + "<interface type='bridge'>" +  \
+                    self.inc_tab()+"<source bridge='" +self.develop_bridge_iface+ "'/>"
+                if windows_os:
+                    text += self.tab() + "<target dev='vnet" + str(net_nb)+ "'/>" +\
+                        self.tab() + "<alias name='net" + str(net_nb)+ "'/>"
+                else:
+                    text += self.tab() + "<model type='e1000'/>" #e1000 is more probable to be supported than 'virtio'
+                if v.get('mac_address', None) != None:
+                    text+= self.tab() +"<mac address='" +v['mac_address']+ "'/>"
+                text += self.pci2xml(v.get('vpci',None))
+                text += self.dec_tab()+'</interface>'
+                continue
+
+            if v['dedicated'] == 'yes':  #passthrought
+                text += self.tab() + "<hostdev mode='subsystem' type='pci' managed='yes'>" + \
+                    self.inc_tab() + "<source>"
+                self.inc_tab()
+                text += self.pci2xml(v['source'])
+                text += self.dec_tab()+'</source>'
+                text += self.pci2xml(v.get('vpci',None))
+                if windows_os:
+                    text += self.tab() + "<alias name='hostdev" + str(net_nb) + "'/>"
+                text += self.dec_tab()+'</hostdev>'
+                net_nb += 1
+            else:        #sriov_interfaces
+                #skip not connected interfaces
+                if v.get("net_id") == None:
+                    continue
+                text += self.tab() + "<interface type='hostdev' managed='yes'>"
+                self.inc_tab()
+                if v.get('mac_address', None) != None:
+                    text+= self.tab() + "<mac address='" +v['mac_address']+ "'/>"
+                text+= self.tab()+'<source>'
+                self.inc_tab()
+                text += self.pci2xml(v['source'])
+                text += self.dec_tab()+'</source>'
+                if v.get('vlan',None) != None:
+                    text += self.tab() + "<vlan>   <tag id='" + str(v['vlan']) + "'/>   </vlan>"
+                text += self.pci2xml(v.get('vpci',None))
+                if windows_os:
+                    text += self.tab() + "<alias name='hostdev" + str(net_nb) + "'/>"
+                text += self.dec_tab()+'</interface>'
+
+        text += self.dec_tab()+'</devices>'+\
+        self.dec_tab()+'</domain>'
+        return 0, text
     
     def pci2xml(self, pci):
         '''from a pci format text XXXX:XX:XX.X generates the xml content of <address>
@@ -785,7 +1334,7 @@ class host_thread(threading.Thread):
         self.xml_level -= 1
         return self.tab()
 
-    def create_ovs_bridge(self):
+    def create_ovs_bridge(self, brname="br-int"): #CLICKOS MOD
         """
         Create a bridge in compute OVS to allocate VMs
         :return: True if success
@@ -794,7 +1343,8 @@ class host_thread(threading.Thread):
             return True
 
         try:
-            self.run_command('sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true')
+            #self.run_command('sudo ovs-vsctl --may-exist add-br br-int -- set Bridge br-int stp_enable=true') #CLICKOS MOD
+            self.run_command('sudo ovs-vsctl --may-exist add-br ' + brname + ' -- set Bridge ' + brname + ' stp_enable=true') #CLICKOS MOD
 
             return True
         except RunCommandException as e:
@@ -815,7 +1365,7 @@ class host_thread(threading.Thread):
             return True
         try:
             port_name = 'ovim-{}'.format(str(vlan))
-            command = 'sudo ovs-vsctl del-port br-int {}'.format(port_name)
+            command = 'sudo ovs-vsctl --if-exists del-port br-int {}'.format(port_name) #CLICKOS MOD
             self.run_command(command)
             return True
         except RunCommandException as e:
@@ -899,7 +1449,7 @@ class host_thread(threading.Thread):
             return True
         try:
             port_name = 'ovim-{}'.format(str(vlan))
-            command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(port_name, str(vlan))
+            command = 'sudo ovs-vsctl --may-exist add-port br-int {} tag={}'.format(port_name, str(vlan)) #CLICKOS MOD
             self.run_command(command)
             return True
         except RunCommandException as e:
@@ -1207,7 +1757,7 @@ class host_thread(threading.Thread):
             dhcp_namespace = '{}-dnsmasq'.format(str(vlan))
 
             dhcp_path = os.path.join(dhcp_path, dhcp_namespace)
-            command = 'sudo ovs-vsctl del-port br-int {}'.format(ovs_veth_name)
+            command = 'sudo ovs-vsctl --if-exists del-port br-int {}'.format(ovs_veth_name) #CLICKOS MOD
             self.run_command(command, ignore_exit_status=True)  # to end session
 
             command = 'sudo ip link set dev {} down'.format(ovs_veth_name)
@@ -1257,7 +1807,7 @@ class host_thread(threading.Thread):
             command = 'sudo ip netns exec {} ip link set dev {} up'.format(dhcp_namespace, ns_veth)
             self.run_command(command)
 
-            command = 'sudo ovs-vsctl add-port br-int {} tag={}'.format(ovs_veth_name, str(vlan))
+            command = 'sudo ovs-vsctl --may-exist add-port br-int {} tag={}'.format(ovs_veth_name, str(vlan)) #CLICKOS MOD
             self.run_command(command, ignore_exit_status=True)
 
             command = 'sudo ip link set dev {} up'.format(ovs_veth_name)
@@ -1540,11 +2090,11 @@ class host_thread(threading.Thread):
             remote_ip = self.local_ip
         try:
 
-            command = 'sudo ovs-vsctl add-port br-int {} -- set Interface {} type=vxlan options:remote_ip={} ' \
+            command = 'sudo ovs-vsctl --may-exist add-port br-int {} -- set Interface {} type=vxlan options:remote_ip={} ' \
                       '-- set Port {} other_config:stp-path-cost=10'.format(vxlan_interface,
                                                                             vxlan_interface,
                                                                             remote_ip,
-                                                                            vxlan_interface)
+                                                                            vxlan_interface) #CLICKOS MOD
             self.run_command(command)
             return True
         except RunCommandException as e:
@@ -1560,14 +2110,14 @@ class host_thread(threading.Thread):
         if self.test or not self.connectivity:
             return True
         try:
-            command = 'sudo ovs-vsctl del-port br-int {}'.format(vxlan_interface)
+            command = 'sudo ovs-vsctl --if-exists del-port br-int {}'.format(vxlan_interface) #CLICKOS MOD
             self.run_command(command)
             return True
         except RunCommandException as e:
             self.logger.error("delete_ovs_vxlan_tunnel, error deleting vxlan tunenl, {}".format(str(e)))
             return False
 
-    def delete_ovs_bridge(self):
+    def delete_ovs_bridge(self, brname="br-int"): #CLICKOS MOD
         """
         Delete a OVS bridge from  a compute.
         :return: True if success
@@ -1575,7 +2125,8 @@ class host_thread(threading.Thread):
         if self.test or not self.connectivity:
             return True
         try:
-            command = 'sudo ovs-vsctl del-br br-int'
+            #command = 'sudo ovs-vsctl del-br br-int'
+            command = 'sudo ovs-vsctl --if-exists del-br ' + brname #CLICKOS MOD
             self.run_command(command)
             return True
         except RunCommandException as e:
@@ -1770,6 +2321,8 @@ class host_thread(threading.Thread):
             if result <= 0:
                 self.logger.error("launch_server ERROR getting server from DB %d %s", result, server_data)
                 return result, server_data
+            
+            self.hypervisor = str(server_data['hypervisor'])        #CLICKOS MOD
     
         #0: get image metadata
             server_metadata = server.get('metadata', {})
@@ -1777,6 +2330,8 @@ class host_thread(threading.Thread):
              
             if "use_incremental" in server_metadata:
                 use_incremental = False if server_metadata["use_incremental"] == "no" else True
+            if self.xen_hyp == True:   #CLICKOS MOD
+                use_incremental = False #CLICKOS MOD
 
             server_host_files = self.localinfo['server_files'].get( server['uuid'], {})
             if rebuild:
@@ -1850,8 +2405,32 @@ class host_thread(threading.Thread):
             self.localinfo['server_files'][ server['uuid'] ] = server_host_files
             self.localinfo_dirty = True
 
+        #2.5 Open vSwitch Networking Provisioning (only for xen hypervisor) #CLICKOS MOD
+            if self.xen_hyp:
+                bridge_interfaces = server_data.get('networks', [])
+                for v in bridge_interfaces:
+                    #Get the brifge name
+                    self.db_lock.acquire()
+                    result, content = self.db.get_table(FROM='nets', SELECT=('name', 'provider',),WHERE={'uuid':v['net_id']} )
+                    self.db_lock.release()
+                    if result <= 0:
+                        print "launch_server ERROR getting nets",result, content
+                        return -1, content
+                    if content[0]['provider'][:5] == "ovsbr":
+                        self.create_ovs_bridge("ovim-" + content[0]['provider'][6:])
+
         #3 Create XML
-            result, xml = self.create_xml_server(server_data, devices, server_metadata)  #local_file
+            if self.xen_hyp: #CLICKOS MOD
+                if self.hypervisor == "xen-unik" and str(server_data['os_image_type']) == "clickos":     #CLICKOS MOD
+                    # Generate XML string for Xen/ClickOS uses.
+                    result, xml = self.create_xml_srv_clickos(server_data, devices, server_metadata)         #CLICKOS MOD
+                else:   #CLICKOS MOD
+                    # Generate XML string for Xen/hvm machine uses.
+                    result, xml = self.create_xml_xen_server(server_data, devices, server_metadata)          #CLICKOS MOD
+            else:                                                                                            #CLICKOS MOD
+                # Generate default XML string for KVM/QEMU uses.
+                result, xml = self.create_xml_server(server_data, devices, server_metadata)  #local_file
+
             if result <0:
                 self.logger.error("create xml server error: " + xml)
                 return -2, xml
@@ -2387,6 +2966,7 @@ def create_server(server, db, db_lock, only_of_ports):
     elif requirements['vcpus']==0:
         return (-1, "Processor information not set neither at extended field not at vcpus")    
 
+    if 'hypervisor' in server: requirements['hypervisor'] = server['hypervisor']   # CLICKOS MOD
 
     db_lock.acquire()
     result, content = db.get_numas(requirements, server.get('host_id', None), only_of_ports)
@@ -2624,6 +3204,8 @@ def create_server(server, db, db_lock, only_of_ports):
     
     if 'description' in server: resources['description'] = server['description']
     if 'name' in server: resources['name'] = server['name']
+    if 'hypervisor' in server: resources['hypervisor'] = server['hypervisor']             # CLICKOS MOD
+    if 'os_image_type' in server: resources['os_image_type'] = server['os_image_type']    # CLICKOS MOD
     
     resources['extended'] = {}                          #optional
     resources['extended']['numas'] = []

@@ -246,6 +246,13 @@ class vim_db():
         w = sql_dict.get('WHERE')
         if w:
             where_and = " AND ".join(map( lambda x: str(x) + (" is Null" if w[x] is None else "='"+str(w[x])+"'"),  w.keys()) )
+        w = sql_dict.get('WHERE_LIKE')  #CLICKOS MOD
+        if w:  #CLICKOS MOD
+            where_and_like = " AND ".join(map( lambda x: str(x) + (" is Null" if w[x] is None else " LIKE '"+str(w[x])+"'"),  w.keys()) )  #CLICKOS MOD
+            if where_and:    #CLICKOS MOD
+                where_and += " AND " + where_and_like  #CLICKOS MOD
+            else:   #CLICKOS MOD
+                where_and = where_and_like  #CLICKOS MOD
         w = sql_dict.get('WHERE_NOT')
         if w:
             where_and_not = " AND ".join(map( lambda x: str(x) + (" is not Null" if w[x] is None else "!='"+str(w[x])+"'"),  w.keys()) )
@@ -472,9 +479,9 @@ class vim_db():
                 with self.con:
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)
                     #get HOST
-                    cmd = "SELECT uuid, user, password, keyfile, name, ip_name, description, ranking, admin_state_up, "\
+                    cmd = "SELECT uuid, user, password, keyfile, name, ip_name, description, hypervisors, ranking, admin_state_up, "\
                           "DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%s') as created_at "\
-                          "FROM hosts WHERE " + where_filter
+                          "FROM hosts WHERE " + where_filter  #CLICKOS MOD
                     self.logger.debug(cmd) 
                     self.cur.execute(cmd)
                     if self.cur.rowcount == 0:
@@ -1052,8 +1059,8 @@ class vim_db():
                 with self.con:
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)
                     #get INSTANCE
-                    cmd = "SELECT uuid, name, description, progress, host_id, flavor_id, image_id, status, last_error, "\
-                        "tenant_id, ram, vcpus, created_at FROM instances WHERE uuid='{}'".format(instance_id)
+                    cmd = "SELECT uuid, name, description, progress, host_id, flavor_id, image_id, status, hypervisor, os_image_type, last_error, "\
+                        "tenant_id, ram, vcpus, created_at FROM instances WHERE uuid='{}'".format(instance_id)  #CLICKOS MOD
                     self.logger.debug(cmd)
                     self.cur.execute(cmd)
                     if self.cur.rowcount == 0 : return 0, "instance '" + str(instance_id) +"'not found."
@@ -1196,6 +1203,19 @@ class vim_db():
                         #self.logger.debug(error_text)
                         return -1, error_text
                     
+                    if not 'hypervisor' in requirements:        #CLICKOS MOD
+                        requirements['hypervisor'] = "kvm"      #CLICKOS MOD
+                    for valid_host in valid_hosts:              #CLICKOS MOD
+                        if not 'hypervisors' in valid_host:     #CLICKOS MOD
+                            valid_host['hypervisors'] = "kvm"   #CLICKOS MOD
+
+                    valid_hosts = tuple(valid_host for valid_host in valid_hosts if requirements['hypervisor'] in valid_host['hypervisors'].split(",")) #CLICKOS MOD
+
+                    if len(valid_hosts)<=0:
+                        error_text = 'No room at data center. Cannot find a host with %s hypervisor or it does not have enough resources available' % (str(requirements['hypervisor']))
+                        #self.logger.debug(error_text)
+                        return -1, error_text
+
                     #elif req_numa != None:
                     #Find valid numa nodes for memory requirements
                     self.cur = self.con.cursor(mdb.cursors.DictCursor)

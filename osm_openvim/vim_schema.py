@@ -58,7 +58,7 @@ mac_schema = {"type": "string", "pattern": "^[0-9a-fA-F][02468aceACE](:[0-9a-fA-
 net_bind_schema = {"oneOf": [
     {"type": "null"},
     {"type": "string", "pattern":
-        "^(default|((bridge|macvtap):[0-9a-zA-Z\.\-]{1,50})|openflow:[/0-9a-zA-Z\.\-]{1,50}(:vlan)?)$"}
+        "^(default|((bridge|macvtap|ovsbr):[0-9a-zA-Z\.\-]{1,50})|openflow:[/0-9a-zA-Z\.\-]{1,50}(:vlan)?)$"} #CLICKOS MOD
 ]}
 yes_no_schema = {"type": "string", "enum": ["yes", "no"]}
 log_level_schema = {"type": "string", "enum":["DEBUG", "INFO", "WARNING","ERROR","CRITICAL"]}
@@ -85,6 +85,8 @@ config_schema = {
         "of_user": nameshort_schema,
         "of_password": nameshort_schema,
         "test_mode": {"type": "boolean"}, # leave for backward compatibility
+        "task_queue_sleep_time": {"type":"integer","minimum":1,"maximun":180000}, #task queue sleep time in ms. min:1ms, max:180000ms. (3 minutes) #CLICKOS MOD
+        "libvirt_conn_mode": {"type" : "string", "enum":["ssh", "tcp", "tls"]}, #CLICKOS MOD
         "mode": {"type":"string", "enum":["normal", "host only", "OF only", "development", "test"] },
         "development_bridge": {"type":"string"},
         "tenant_id": {"type" : "string"},
@@ -274,6 +276,7 @@ host_data_schema={
         "password": nameshort_schema,
         "keyfile": path_schema,
         "features": description_schema,
+        "hypervisors": description_schema,   #CLICKOS MOD
         "ranking": integer0_schema,
         "autodiscover": {"type": "boolean"},    # try to discover host parameters instead of providing in this schema
         "devices": {
@@ -540,6 +543,8 @@ server_new_schema = {
                 "name":name_schema,
                 "description":description_schema,
                 "start":{"type":"string", "enum":["yes","no","paused"]},
+                "hypervisor":{"type":"string", "enum":["kvm","xen-unik","xenhvm"]}, #CLICKOS MOD
+                "osImageType":{"type":"string", "enum":["clickos","other"]}, #CLICKOS MOD
                 "hostId":id_schema,
                 "flavorRef":id_schema,
                 "imageRef":id_schema,

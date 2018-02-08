@@ -199,8 +199,8 @@ class ovim():
         host_develop_bridge_iface = self.config.get('development_bridge', None)
 
         # get host list from data base before starting threads
-        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid', 'password', 'keyfile'),
-                                     FROM='hosts', WHERE={'status': 'ok'})
+        r, hosts = self.db.get_table(SELECT=('name', 'ip_name', 'user', 'uuid', 'hypervisors', 'password', 'keyfile'),
+                                     FROM='hosts', WHERE={'status': 'ok'}) #CLICKOS MOD
         if r < 0:
             raise ovimException("Cannot get hosts from database {}".format(hosts))
 
@@ -215,6 +215,9 @@ class ovim():
                                     version=self.config['version'], host_id=host['uuid'],
                                     develop_mode=host_develop_mode,
                                     develop_bridge_iface=host_develop_bridge_iface,
+                                    hypervisors=host['hypervisors'],  #CLICKOS MOD
+                                    libvirt_conn_mode=self.config['libvirt_conn_mode'],         #CLICKOS MOD
+                                    task_queue_sleep_time=self.config['task_queue_sleep_time'], #CLICKOS MOD
                                     logger_name=self.logger_name + ".host." + host['name'],
                                     debug=self.config.get('log_level_host'))
 
@@ -647,7 +650,7 @@ class ovim():
         if not net_region:
             if net_type == "data" or net_type == "ptp":
                 net_region = "__DATA__"
-            elif net_provider == "OVS":
+            elif net_provider == "OVS" or net_provider[:5] == "ovsbr":  #CLICKOS MOD
                 net_region = "__OVS__"
         if not net_vlan and (net_type == "data" or net_type == "ptp" or net_provider == "OVS"):
             net_vlan = self.db.get_free_net_vlan(net_region)
@@ -655,6 +658,8 @@ class ovim():
                 raise ovimException("Error getting an available vlan", HTTP_Internal_Server_Error)
         if net_provider == 'OVS':
             net_provider = 'OVS' + ":" + str(net_vlan)
+        elif net_provider == 'ovsbr':            #CLICKOS MOD
+            net_provider = 'ovsbr:' + str(name)  #CLICKOS MOD
 
         network['provider'] = net_provider
         network['type'] = net_type
@@ -1424,6 +1429,8 @@ class ovim():
                                    image_path=self.config['host_image_path'], version=self.config['version'],
                                    host_id='openvim_controller', develop_mode=host_develop_mode,
                                    develop_bridge_iface=bridge_ifaces,
+                                   libvirt_conn_mode=self.config['libvirt_conn_mode'],         #CLICKOS MOD
+                                   task_queue_sleep_time=self.config['task_queue_sleep_time'], #CLICKOS MOD
                                    logger_name=self.logger_name + ".host.controller",
                                    debug=self.config.get('log_level_host'))
         # dhcp_host.start()
