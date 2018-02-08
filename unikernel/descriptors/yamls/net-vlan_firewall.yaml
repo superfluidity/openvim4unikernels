@@ -1,0 +1,7 @@
+network:
+    name:               vlan_firewall
+    type:               bridge_data
+    provider:           OVS:default
+    enable_dhcp:        false
+    shared:             false
+

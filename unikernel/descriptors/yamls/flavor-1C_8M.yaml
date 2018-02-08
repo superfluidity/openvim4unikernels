@@ -1,0 +1,6 @@
+flavor:
+  name: CloudVM_1C_8M
+  description: clickos cloud image with 8M, 1core
+  ram: 8
+  vcpus: 1
+

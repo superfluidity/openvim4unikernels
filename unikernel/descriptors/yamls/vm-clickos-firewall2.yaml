@@ -1,0 +1,17 @@
+server:
+  name: vm-clickos-firewall2
+  description: ClickOS firewall vm with simple requisites.
+  imageRef: 'bf474f1c-10c1-11e7-ad8f-0cc47a7794be'
+  flavorRef: '5a258552-0a51-11e7-a086-0cc47a7794be'
+#  hostId: '195d4fb2-54fe-11e7-ad8f-0cc47a7794be'
+  start:    "yes"
+  hypervisor: "xen-unik"
+  osImageType: "clickos"
+  networks:
+  - name: vif0
+    uuid: 3c39460e-3bdf-11e7-ad8f-0cc47a7794be
+    mac_address: "00:15:17:15:5d:84"
+  - name: vif1
+    uuid: f136bd32-3fd8-11e7-ad8f-0cc47a7794be
+    mac_address: "00:15:17:15:5d:85"
+

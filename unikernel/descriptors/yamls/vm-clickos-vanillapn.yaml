@@ -1,0 +1,15 @@
+server:
+  name: vm-clickos-ping
+  description: ClickOS ping vm with simple requisites.
+  imageRef: 'b9bcaf52-b314-11e6-866f-0cc47a7794be'
+  flavorRef: '5a258552-0a51-11e7-a086-0cc47a7794be'
+  start:    "yes"
+  hypervisor: "xen-unik"
+  osImageType: "clickos"
+  networks:
+  - name: vif0
+    uuid: af196508-10b2-11e7-89a7-70e42283d098
+    mac_address: "00:15:17:15:5d:74" 
+#  - name: vif1
+#    uuid: af196508-10b2-11e7-89a7-70e42283d098
+#    mac_address: "00:15:17:15:5d:75"
